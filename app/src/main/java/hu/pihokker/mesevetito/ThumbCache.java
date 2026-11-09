@@ -40,6 +40,10 @@ final class ThumbCache {
         dir = new File(ctx.getCacheDir(), "thumbs");
         //noinspection ResultOfMethodCallIgnored
         dir.mkdirs();
+        // a korábbi (hibás) JPEG előnézetek törlése
+        File[] old = dir.listFiles((d, name) -> name.endsWith(".jpg"));
+        if (old != null) for (File f : old) //noinspection ResultOfMethodCallIgnored
+            f.delete();
         mem = new LruCache<String, Bitmap>(28 * 1024 * 1024) {
             @Override
             protected int sizeOf(String k, Bitmap v) {
@@ -56,7 +60,7 @@ final class ThumbCache {
     }
 
     static String keyOf(Node n) {
-        return md5(n.key() + "|" + n.size() + "|" + n.modified());
+        return md5("v2|" + n.key() + "|" + n.size() + "|" + n.modified());
     }
 
     /** Memóriából, ha már megvan; különben null (és ilyenkor érdemes request()-et hívni). */
@@ -115,15 +119,18 @@ final class ThumbCache {
     }
 
     private Bitmap load(Node n, String k) {
-        File f = new File(dir, k + ".jpg");
+        File f = new File(dir, k + ".webp");
         if (f.exists()) {
             Bitmap b = BitmapFactory.decodeFile(f.getPath());
             if (b != null) return b;
         }
-        Bitmap b = Images.decodeFit(n, SIZE, SIZE);
+        Bitmap b = Images.decodeThumb(n, SIZE, SIZE);
         if (b == null) return null;
         try (FileOutputStream out = new FileOutputStream(f)) {
-            b.compress(Bitmap.CompressFormat.JPEG, 85, out);
+            // WebP: szoftveresen dekódolódik, nem a projektor JPEG-dekóderével
+            Bitmap.CompressFormat fmt = android.os.Build.VERSION.SDK_INT >= 30
+                    ? Bitmap.CompressFormat.WEBP_LOSSY : Bitmap.CompressFormat.WEBP;
+            b.compress(fmt, 88, out);
         } catch (Exception ignored) {
         }
         return b;

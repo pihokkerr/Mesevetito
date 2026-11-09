@@ -53,7 +53,8 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
 
     private static final int CREAM = Color.rgb(243, 230, 200);
     private static final int CANDLE = Color.rgb(232, 200, 138);
-    private static final int MUTED = Color.rgb(122, 114, 102);
+    private static final int MUTED = Color.rgb(170, 160, 144);
+    private static final Typeface REGULAR = Typeface.create("sans-serif", Typeface.NORMAL);
     private static final Typeface LIGHT = Typeface.create("sans-serif-light", Typeface.NORMAL);
     private static final float[] SCALES = {1f, 0.94f, 0.88f, 0.82f};
 
@@ -444,7 +445,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         // ---- könyvtár
         LinearLayout lib = new LinearLayout(this);
         lib.setOrientation(LinearLayout.VERTICAL);
-        lib.setPadding(px(110), px(36), px(110), 0);
+        lib.setPadding(px(90), px(36), px(90), 0);
         libraryLayer = lib;
 
         LinearLayout header = new LinearLayout(this);
@@ -469,7 +470,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         grid = new GridView(this);
         grid.setNumColumns(4);
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        grid.setHorizontalSpacing(px(48));
+        grid.setHorizontalSpacing(px(40));
         grid.setVerticalSpacing(px(34));
         grid.setPadding(0, px(30), 0, px(70));
         grid.setClipToPadding(false);
@@ -649,19 +650,19 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
                 h = new Holder();
                 h.cover = new CoverView(MainActivity.this);
                 cell.addView(h.cover, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, px(290)));
+                        ViewGroup.LayoutParams.MATCH_PARENT, px(270)));
                 h.title = new TextView(MainActivity.this);
                 h.title.setTextColor(MUTED);
-                h.title.setTypeface(LIGHT);
-                h.title.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(23));
+                h.title.setTypeface(REGULAR);
+                h.title.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(31));
                 h.title.setLetterSpacing(0.02f);
                 h.title.setLineSpacing(px(4), 1f);
                 h.title.setGravity(Gravity.CENTER_HORIZONTAL);
                 h.title.setMaxLines(2);
                 h.title.setEllipsize(TextUtils.TruncateAt.END);
-                h.title.setPadding(px(10), px(12), px(10), 0);
+                h.title.setPadding(px(6), px(14), px(6), 0);
                 cell.addView(h.title, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, px(84)));
+                        ViewGroup.LayoutParams.MATCH_PARENT, px(104)));
                 cell.setTag(h);
                 convert = cell;
             } else {

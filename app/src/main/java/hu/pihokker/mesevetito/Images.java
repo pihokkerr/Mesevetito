@@ -26,40 +26,45 @@ final class Images {
     }
 
     /**
-     * Betölti a képet úgy, hogy beleférjen a boxW x boxH dobozba (arányt tartva).
-     * A kicsinyítés már dekódolás közben történik.
+     * Kis előnézet. A projektor dekódere a kicsinyítve (inSampleSize) betöltött JPEG-eket
+     * néha hibásan adja vissza (zöld-lila csíkok), ezért itt teljes méretben töltünk be,
+     * és szoftveresen kicsinyítünk. Csak óriási képeknél felezünk.
      */
-    static Bitmap decodeFit(Node n, int boxW, int boxH) {
+    static Bitmap decodeThumb(Node n, int boxW, int boxH) {
         int[] b = bounds(n);
         if (b == null) return null;
         int w = b[0], h = b[1];
-
-        // a végső méret: arányosan bele a dobozba; addig felezünk, amíg még nem lesz kisebb annál
-        float fit = Math.min((float) boxW / w, (float) boxH / h);
         int sample = 1;
-        while (sample * 2 * fit <= 1f) sample *= 2;
-        // ha még így is nagyon nagy a kép (pl. hosszú csík), tovább felezünk
-        while ((long) (w / sample) * (h / sample) > 4L * boxW * boxH) sample *= 2;
-
-        int sw = (w + sample - 1) / sample;
-        int sh = (h + sample - 1) / sample;
-        float ratio = Math.min((float) boxW / sw, (float) boxH / sh);
+        while ((long) (w / sample) * (h / sample) > 16_000_000L) sample *= 2;
 
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inSampleSize = sample;
+        o.inScaled = false;
         o.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        if (ratio < 1f) {
-            // pontos kicsinyítés dekódolás közben, külön másolat nélkül
-            o.inScaled = true;
-            o.inDensity = sw;
-            o.inTargetDensity = Math.max(1, Math.round(sw * ratio));
-        } else {
-            o.inScaled = false;
-        }
+        Bitmap full;
         try (InputStream in = n.open()) {
-            return BitmapFactory.decodeStream(in, null, o);
+            full = BitmapFactory.decodeStream(in, null, o);
         } catch (IOException | OutOfMemoryError e) {
             return null;
         }
+        if (full == null) return null;
+        float s = Math.min((float) boxW / full.getWidth(), (float) boxH / full.getHeight());
+        if (s >= 1f) return full;
+        int tw = Math.max(1, Math.round(full.getWidth() * s));
+        int th = Math.max(1, Math.round(full.getHeight() * s));
+        // két lépésben kicsinyítünk, így simább (kevésbé recés) lesz
+        Bitmap mid = full;
+        if (s < 0.5f) {
+            mid = Bitmap.createScaledBitmap(full, tw * 2, th * 2, true);
+            if (mid != full) full.recycle();
+        }
+        Bitmap out = Bitmap.createScaledBitmap(mid, tw, th, true);
+        if (out != mid) mid.recycle();
+        return out;
+    }
+
+    /** A teljes oldal a vetítéshez: ugyanazon a biztonságos úton, mint az előnézet. */
+    static Bitmap decodeFit(Node n, int boxW, int boxH) {
+        return decodeThumb(n, boxW, boxH);
     }
 }

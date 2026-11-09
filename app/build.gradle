@@ -1,0 +1,30 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'hu.pihokker.mesevetito.teszt'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'hu.pihokker.mesevetito.teszt'
+        minSdk 26
+        // 30 = Android 11, a projektor rendszere
+        targetSdk 30
+        versionCode 1
+        versionName '0.1-teszt'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Saját használatra: a debug kulccsal írjuk alá, így telepíthető
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

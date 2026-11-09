@@ -36,12 +36,13 @@ final class FilmStripView extends View {
         setFocusable(false);
         slot.setColor(Color.rgb(40, 34, 28));
         frame.setStyle(Paint.Style.STROKE);
-        frame.setColor(CANDLE);
+        frame.setColor(Color.argb(200, 243, 230, 200));
         num.setColor(Color.rgb(150, 135, 110));
         num.setTextAlign(Paint.Align.CENTER);
         label.setColor(CREAM);
         label.setTextAlign(Paint.Align.CENTER);
-        label.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        label.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        label.setLetterSpacing(0.08f);
     }
 
     void bind(List<Node> pages, ThumbCache thumbs) {
@@ -58,8 +59,9 @@ final class FilmStripView extends View {
     protected void onSizeChanged(int w, int h, int ow, int oh) {
         bg.setShader(new LinearGradient(0, 0, 0, h, 0x00000000, 0xE6000000, Shader.TileMode.CLAMP));
         frame.setStrokeWidth(Math.max(2f, h * 0.012f));
-        num.setTextSize(h * 0.1f);
-        label.setTextSize(h * 0.13f);
+        num.setTextSize(h * 0.08f);
+        num.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        label.setTextSize(h * 0.1f);
     }
 
     @Override

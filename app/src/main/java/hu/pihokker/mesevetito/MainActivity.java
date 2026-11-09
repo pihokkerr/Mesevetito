@@ -53,7 +53,8 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
 
     private static final int CREAM = Color.rgb(243, 230, 200);
     private static final int CANDLE = Color.rgb(232, 200, 138);
-    private static final int MUTED = Color.rgb(160, 148, 128);
+    private static final int MUTED = Color.rgb(122, 114, 102);
+    private static final Typeface LIGHT = Typeface.create("sans-serif-light", Typeface.NORMAL);
     private static final float[] SCALES = {1f, 0.94f, 0.88f, 0.82f};
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -437,33 +438,25 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
         GradientDrawable sky = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{Color.rgb(22, 24, 38), Color.rgb(30, 26, 36), Color.rgb(36, 27, 24)});
+                new int[]{Color.rgb(15, 16, 21), Color.rgb(18, 17, 20), Color.rgb(22, 18, 17)});
         root.setBackground(sky);
 
         // ---- könyvtár
         LinearLayout lib = new LinearLayout(this);
         lib.setOrientation(LinearLayout.VERTICAL);
-        lib.setPadding(px(90), px(56), px(90), 0);
+        lib.setPadding(px(110), px(36), px(110), 0);
         libraryLayer = lib;
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView title = new TextView(this);
-        title.setText("Esti mesék");
-        title.setTextColor(CREAM);
-        title.setTypeface(Typeface.create(Typeface.SERIF, Typeface.NORMAL));
-        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(58));
-        title.setLetterSpacing(0.02f);
-        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        header.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
 
         musicBtn = makeButton("♪  Zene: be");
         musicBtn.setOnClickListener(v -> toggleMusic());
         musicBtn.setVisibility(View.GONE);
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, px(64));
-        blp.leftMargin = px(20);
+                ViewGroup.LayoutParams.WRAP_CONTENT, px(52));
+        blp.leftMargin = px(14);
         header.addView(musicBtn, blp);
 
         sizeBtn = makeButton("Képméret: 100%");
@@ -471,14 +464,14 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         header.addView(sizeBtn, new LinearLayout.LayoutParams(blp));
 
         lib.addView(header, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, px(110)));
+                ViewGroup.LayoutParams.MATCH_PARENT, px(70)));
 
         grid = new GridView(this);
         grid.setNumColumns(4);
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        grid.setHorizontalSpacing(px(34));
-        grid.setVerticalSpacing(px(30));
-        grid.setPadding(0, px(26), 0, px(60));
+        grid.setHorizontalSpacing(px(48));
+        grid.setVerticalSpacing(px(34));
+        grid.setPadding(0, px(30), 0, px(70));
         grid.setClipToPadding(false);
         grid.setSelector(new ColorDrawable(Color.TRANSPARENT));
         grid.setVerticalScrollBarEnabled(false);
@@ -512,8 +505,8 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         messageText = new TextView(this);
         messageText.setTextColor(CREAM);
         messageText.setGravity(Gravity.CENTER);
-        messageText.setTypeface(Typeface.SERIF);
-        messageText.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(40));
+        messageText.setTypeface(LIGHT);
+        messageText.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(34));
         messageText.setLineSpacing(px(10), 1f);
         messageLayer.addView(messageText);
         actionBtn = makeButton("");
@@ -535,12 +528,12 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         readerLayer.addView(strip, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, px(330), Gravity.BOTTOM));
         toast = new TextView(this);
-        toast.setTextColor(CREAM);
-        toast.setTypeface(Typeface.SERIF);
-        toast.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(34));
+        toast.setTextColor(Color.rgb(200, 190, 170));
+        toast.setTypeface(LIGHT);
+        toast.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(28));
         toast.setPadding(px(30), px(14), px(30), px(14));
         GradientDrawable tbg = new GradientDrawable();
-        tbg.setColor(Color.argb(170, 20, 16, 12));
+        tbg.setColor(Color.argb(140, 12, 10, 8));
         tbg.setCornerRadius(px(40));
         toast.setBackground(tbg);
         toast.setVisibility(View.GONE);
@@ -560,18 +553,21 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         Button b = new Button(this);
         b.setText(text);
         b.setAllCaps(false);
-        b.setTextColor(CREAM);
-        b.setTypeface(Typeface.SERIF);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(28));
-        b.setPadding(px(30), 0, px(30), 0);
+        b.setTextColor(new android.content.res.ColorStateList(
+                new int[][]{{android.R.attr.state_focused}, {}},
+                new int[]{CREAM, MUTED}));
+        b.setTypeface(LIGHT);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(23));
+        b.setLetterSpacing(0.04f);
+        b.setPadding(px(24), 0, px(24), 0);
         b.setFocusable(true);
         GradientDrawable normal = new GradientDrawable();
-        normal.setCornerRadius(px(32));
-        normal.setColor(Color.argb(60, 255, 240, 210));
+        normal.setCornerRadius(px(26));
+        normal.setColor(Color.TRANSPARENT);
         GradientDrawable focused = new GradientDrawable();
-        focused.setCornerRadius(px(32));
-        focused.setColor(Color.argb(110, 232, 200, 138));
-        focused.setStroke(Math.max(2, px(3)), CANDLE);
+        focused.setCornerRadius(px(26));
+        focused.setColor(Color.argb(28, 243, 230, 200));
+        focused.setStroke(Math.max(1, px(2)), Color.argb(160, 232, 200, 138));
         StateListDrawable sl = new StateListDrawable();
         sl.addState(new int[]{android.R.attr.state_focused}, focused);
         sl.addState(new int[]{android.R.attr.state_pressed}, focused);
@@ -612,8 +608,8 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
                 h.cover.setHighlighted(on);
                 h.title.setTextColor(on ? CREAM : MUTED);
             }
-            float s = on ? 1.06f : 1f;
-            child.animate().scaleX(s).scaleY(s).setDuration(260)
+            float s = on ? 1.04f : 1f;
+            child.animate().scaleX(s).scaleY(s).setDuration(320)
                     .setInterpolator(new DecelerateInterpolator()).start();
         }
     }
@@ -653,15 +649,17 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
                 h = new Holder();
                 h.cover = new CoverView(MainActivity.this);
                 cell.addView(h.cover, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, px(300)));
+                        ViewGroup.LayoutParams.MATCH_PARENT, px(290)));
                 h.title = new TextView(MainActivity.this);
                 h.title.setTextColor(MUTED);
-                h.title.setTypeface(Typeface.SERIF);
-                h.title.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(27));
+                h.title.setTypeface(LIGHT);
+                h.title.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(23));
+                h.title.setLetterSpacing(0.02f);
+                h.title.setLineSpacing(px(4), 1f);
                 h.title.setGravity(Gravity.CENTER_HORIZONTAL);
                 h.title.setMaxLines(2);
                 h.title.setEllipsize(TextUtils.TruncateAt.END);
-                h.title.setPadding(px(8), px(6), px(8), 0);
+                h.title.setPadding(px(10), px(12), px(10), 0);
                 cell.addView(h.title, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, px(84)));
                 cell.setTag(h);
@@ -682,8 +680,8 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
             boolean on = grid.hasFocus() && pos == selected;
             h.cover.setHighlighted(on);
             h.title.setTextColor(on ? CREAM : MUTED);
-            convert.setScaleX(on ? 1.06f : 1f);
-            convert.setScaleY(on ? 1.06f : 1f);
+            convert.setScaleX(on ? 1.04f : 1f);
+            convert.setScaleY(on ? 1.04f : 1f);
             return convert;
         }
     }

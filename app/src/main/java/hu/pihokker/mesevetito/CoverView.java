@@ -33,16 +33,15 @@ final class CoverView extends View {
     CoverView(Context c) {
         super(c);
         setFocusable(false);
-        setLayerType(LAYER_TYPE_SOFTWARE, null); // a fénykeret elmosásához
-        placeholder.setColor(Color.rgb(52, 46, 58));
-        letter.setColor(Color.rgb(150, 135, 110));
+        placeholder.setColor(Color.rgb(32, 30, 32));
+        letter.setColor(Color.rgb(96, 88, 78));
         letter.setTextAlign(Paint.Align.CENTER);
-        letter.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        letter.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         frame.setStyle(Paint.Style.STROKE);
-        frame.setColor(CANDLE);
+        frame.setColor(Color.argb(200, 243, 230, 200));
         glow.setStyle(Paint.Style.STROKE);
-        glow.setColor(Color.argb(150, 232, 200, 138));
-        shadow.setColor(Color.argb(120, 0, 0, 0));
+        glow.setColor(Color.argb(40, 232, 200, 138));
+        shadow.setColor(Color.argb(90, 0, 0, 0));
         bar.setColor(CANDLE);
     }
 
@@ -87,10 +86,10 @@ final class CoverView extends View {
 
         // fény a kijelölt borító körül
         if (highlighted) {
-            glow.setStrokeWidth(pad * 1.2f);
-            glow.setMaskFilter(new android.graphics.BlurMaskFilter(pad * 0.8f,
-                    android.graphics.BlurMaskFilter.Blur.NORMAL));
-            c.drawRoundRect(r, radius, radius, glow);
+            float o = pad * 0.45f;
+            glow.setStrokeWidth(pad * 0.5f);
+            c.drawRoundRect(r.left - o, r.top - o, r.right + o, r.bottom + o,
+                    radius + o, radius + o, glow);
         }
 
         c.save();
@@ -98,7 +97,7 @@ final class CoverView extends View {
         clip.addRoundRect(r, radius, radius, Path.Direction.CW);
         c.clipPath(clip);
         if (bitmap != null) {
-            if (!highlighted) bmp.setAlpha(215); else bmp.setAlpha(255);
+            bmp.setAlpha(highlighted ? 255 : 150); // a többi könyv halkabb, kevesebb fény este
             c.drawBitmap(bitmap, null, r, bmp);
         } else {
             c.drawRect(r, placeholder);
@@ -108,13 +107,13 @@ final class CoverView extends View {
         // hol tartottatok: vékony csík alul
         if (progress > 0f) {
             float bh = Math.max(3f, h * 0.014f);
-            bar.setAlpha(220);
+            bar.setAlpha(highlighted ? 210 : 120);
             c.drawRect(r.left, r.bottom - bh, r.left + r.width() * progress, r.bottom, bar);
         }
         c.restore();
 
         if (highlighted) {
-            frame.setStrokeWidth(Math.max(2f, pad * 0.25f));
+            frame.setStrokeWidth(Math.max(1.5f, pad * 0.14f));
             c.drawRoundRect(r, radius, radius, frame);
         }
     }

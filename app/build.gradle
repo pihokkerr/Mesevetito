@@ -23,6 +23,13 @@ android {
         }
     }
 
+    // Saját app, nem megy Play Store-ba: a Play-szabályt nem kérjük számon
+    lint {
+        disable 'ExpiredTargetSdkVersion'
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

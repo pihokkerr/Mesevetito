@@ -3,16 +3,16 @@ plugins {
 }
 
 android {
-    namespace 'hu.pihokker.mesevetito.teszt'
+    namespace 'hu.pihokker.mesevetito'
     compileSdk 34
 
     defaultConfig {
-        applicationId 'hu.pihokker.mesevetito.teszt'
+        applicationId 'hu.pihokker.mesevetito'
         minSdk 26
         // 30 = Android 11, a projektor rendszere
         targetSdk 30
         versionCode 1
-        versionName '0.1-teszt'
+        versionName '1.0'
     }
 
     buildTypes {

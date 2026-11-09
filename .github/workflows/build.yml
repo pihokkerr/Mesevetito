@@ -26,12 +26,12 @@ jobs:
         run: gradle assembleRelease --no-daemon
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk MesevetitoTeszt.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Mesevetito.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MesevetitoTeszt
-          path: MesevetitoTeszt.apk
+          name: Mesevetito
+          path: Mesevetito.apk
 
       # Állandó letöltési link: Releases → "latest"
       - name: Publish to release
@@ -41,4 +41,4 @@ jobs:
           name: Legfrissebb build
           body: "Build: ${{ github.sha }}"
           prerelease: true
-          files: MesevetitoTeszt.apk
+          files: Mesevetito.apk

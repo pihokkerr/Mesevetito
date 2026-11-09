@@ -1,14 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#2B2118" />
-        </shape>
-    </item>
-    <item android:left="30dp" android:right="30dp" android:top="20dp" android:bottom="20dp">
-        <shape android:shape="rectangle">
-            <corners android:radius="6dp" />
-            <solid android:color="#E8C88A" />
-        </shape>
-    </item>
-</layer-list>
+<!-- 320x180 TV-banner: éjszakai ég, hold, nyitott könyv -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#1A1C2B" android:pathData="M0,0h320v180h-320z"/>
+    <path android:fillColor="#E8C88A" android:pathData="M238,38a26,26 0 1,0 26,34a20,20 0 1,1 -26,-34z"/>
+    <path android:fillColor="#F3E6C8" android:pathData="M70,40h2v2h-2zM110,26h2v2h-2zM150,52h2v2h-2zM196,30h2v2h-2zM280,110h2v2h-2zM40,96h2v2h-2z"/>
+    <path android:fillColor="#E8C88A" android:pathData="M86,140c24,-10 48,-10 72,2v-62c-24,-12 -48,-12 -72,-2z"/>
+    <path android:fillColor="#D9B474" android:pathData="M230,140c-24,-10 -48,-10 -72,2v-62c24,-12 48,-12 72,-2z"/>
+    <path android:fillColor="#00000000" android:strokeColor="#5A4630" android:strokeWidth="2" android:pathData="M158,82v60"/>
+</vector>

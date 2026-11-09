@@ -1,0 +1,690 @@
+package hu.pihokker.mesevetito;
+
+import android.Manifest;
+import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.storage.StorageManager;
+import android.os.storage.StorageVolume;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.util.DisplayMetrics;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
+import android.widget.AdapterView;
+import android.widget.BaseAdapter;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.GridView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class MainActivity extends Activity implements ThumbCache.Listener {
+
+    private static final int REQ_READ = 1;
+    private static final int REQ_TREE = 2;
+
+    private static final int CREAM = Color.rgb(243, 230, 200);
+    private static final int CANDLE = Color.rgb(232, 200, 138);
+    private static final int MUTED = Color.rgb(160, 148, 128);
+    private static final float[] SCALES = {1f, 0.94f, 0.88f, 0.82f};
+
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService scanner = Executors.newSingleThreadExecutor();
+
+    private SharedPreferences prefs;
+    private ThumbCache thumbs;
+    private MusicPlayer music;
+    private Reader reader;
+
+    private float unit; // 1 egység = képernyőmagasság / 1080
+
+    private View libraryLayer;
+    private GridView grid;
+    private Button musicBtn, sizeBtn;
+    private LinearLayout messageLayer;
+    private TextView messageText;
+    private Button actionBtn;
+    private FrameLayout readerLayer;
+    private ReaderView readerView;
+    private TextView toast;
+
+    private final List<Library.Book> books = new ArrayList<>();
+    private BooksAdapter adapter;
+    private int selected = 0;
+    private int lastStatus = -1;
+    private boolean scanning;
+    private boolean rescanQueued;
+    private boolean swallowBackUp;
+
+    // ================================================================ életciklus
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        prefs = getSharedPreferences("mesevetito", MODE_PRIVATE);
+        thumbs = new ThumbCache(this);
+        thumbs.addListener(this);
+        music = new MusicPlayer(this);
+        music.setEnabled(prefs.getBoolean("music", true));
+
+        DisplayMetrics dm = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+        unit = Math.min(dm.widthPixels, dm.heightPixels) / 1080f;
+
+        buildUi();
+        reader = new Reader(readerView, (FilmStripView) readerLayer.getChildAt(1), thumbs, prefs);
+        reader.setBox(Math.max(dm.widthPixels, dm.heightPixels), Math.min(dm.widthPixels, dm.heightPixels));
+        applyScale();
+
+        IntentFilter f = new IntentFilter();
+        f.addAction(Intent.ACTION_MEDIA_MOUNTED);
+        f.addAction(Intent.ACTION_MEDIA_UNMOUNTED);
+        f.addAction(Intent.ACTION_MEDIA_REMOVED);
+        f.addAction(Intent.ACTION_MEDIA_EJECT);
+        f.addAction(Intent.ACTION_MEDIA_BAD_REMOVAL);
+        f.addDataScheme("file");
+        registerReceiver(usbReceiver, f);
+
+        if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_READ);
+        } else {
+            rescan();
+        }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        music.setForeground(true);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // pl. visszatérés az engedély-beállításból
+        if (lastStatus != -1 && lastStatus != Library.OK) rescan();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        music.setForeground(false);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        try {
+            unregisterReceiver(usbReceiver);
+        } catch (Exception ignored) {
+        }
+        music.destroy();
+        reader.close();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        if (requestCode == REQ_READ) rescan();
+    }
+
+    private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            if (!Intent.ACTION_MEDIA_MOUNTED.equals(i.getAction()) && reader.isOpen()) {
+                closeBook(false);
+            }
+            main.removeCallbacks(delayedRescan);
+            main.postDelayed(delayedRescan, 900);
+        }
+    };
+
+    private final Runnable delayedRescan = this::rescan;
+
+    // ================================================================ beolvasás
+
+    private void rescan() {
+        if (scanning) {
+            rescanQueued = true;
+            return;
+        }
+        scanning = true;
+        if (books.isEmpty()) showMessage("Könyvek keresése…", null, null);
+        scanner.execute(() -> {
+            Library lib = Library.scan(this);
+            main.post(() -> {
+                scanning = false;
+                applyLibrary(lib);
+                if (rescanQueued) {
+                    rescanQueued = false;
+                    rescan();
+                }
+            });
+        });
+    }
+
+    private void applyLibrary(Library lib) {
+        lastStatus = lib.status;
+        music.setTracks(lib.music);
+        updateMusicButton(lib.music.isEmpty());
+
+        String prevKey = selected < books.size() ? books.get(selected).key : null;
+        books.clear();
+        books.addAll(lib.books);
+        adapter.notifyDataSetChanged();
+
+        if (lib.status == Library.NO_USB) {
+            showMessage("Dugd be a pendrive-ot a mesékkel.", null, null);
+            return;
+        }
+        if (lib.status == Library.NEED_PERMISSION) {
+            showMessage("A pendrive olvasásához engedély kell.", "Engedélyezés", this::askPermission);
+            return;
+        }
+        if (books.isEmpty()) {
+            showMessage("Nem találtam könyvet a pendrive-on.\n"
+                    + "Minden könyv egy mappa legyen, benne az oldalak képei.", null, null);
+            return;
+        }
+
+        hideMessage();
+        int sel = 0;
+        for (int i = 0; i < books.size(); i++) {
+            if (books.get(i).key.equals(prevKey)) sel = i;
+            thumbs.request(books.get(i).pages.get(0), i < 12);
+        }
+        selected = sel;
+        if (!reader.isOpen()) {
+            grid.requestFocus();
+            grid.setSelection(sel);
+        }
+    }
+
+    private void askPermission() {
+        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + getPackageName())));
+                return;
+            } catch (ActivityNotFoundException ignored) {
+            }
+        }
+        // tartalék: a rendszer mappaválasztója
+        Intent intent = null;
+        StorageManager sm = (StorageManager) getSystemService(Context.STORAGE_SERVICE);
+        for (StorageVolume v : sm.getStorageVolumes()) {
+            if (v.isRemovable()) {
+                intent = v.createOpenDocumentTreeIntent();
+                break;
+            }
+        }
+        if (intent == null) intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, REQ_TREE);
+        } catch (ActivityNotFoundException e) {
+            showMessage("Ezen a készüléken nem sikerült engedélyt kérni.", null, null);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_TREE && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            try {
+                getContentResolver().takePersistableUriPermission(data.getData(),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException ignored) {
+            }
+            rescan();
+        }
+    }
+
+    // ================================================================ könyv nyitása / zárása
+
+    private void openBook(int pos) {
+        if (pos < 0 || pos >= books.size() || reader.isOpen()) return;
+        selected = pos;
+        Library.Book b = books.get(pos);
+        readerLayer.setAlpha(0f);
+        readerLayer.setVisibility(View.VISIBLE);
+        readerView.setScaleX(1.04f);
+        readerView.setScaleY(1.04f);
+        reader.open(b, () -> {
+            readerLayer.animate().alpha(1f).setDuration(900)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(() -> libraryLayer.setVisibility(View.INVISIBLE)).start();
+            readerView.animate().scaleX(1f).scaleY(1f).setDuration(1600)
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        });
+    }
+
+    private void closeBook(boolean animated) {
+        if (!reader.isOpen()) return;
+        libraryLayer.setVisibility(View.VISIBLE);
+        adapter.notifyDataSetChanged(); // a haladás-csík frissüljön
+        grid.requestFocus();
+        grid.setSelection(selected);
+        if (animated) {
+            readerLayer.animate().alpha(0f).setDuration(550)
+                    .withEndAction(() -> {
+                        readerLayer.setVisibility(View.GONE);
+                        reader.close();
+                    }).start();
+        } else {
+            readerLayer.setVisibility(View.GONE);
+            reader.close();
+        }
+    }
+
+    // ================================================================ gombok
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        int code = e.getKeyCode();
+
+        // a könyvből kilépő Vissza gomb felengedése ne zárja be az egész appot
+        if ((code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE)
+                && e.getAction() == KeyEvent.ACTION_UP && swallowBackUp) {
+            swallowBackUp = false;
+            return true;
+        }
+
+        if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MENU) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) toggleMusic();
+            return true;
+        }
+
+        if (reader.isOpen()) {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return true;
+            switch (code) {
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                case KeyEvent.KEYCODE_PAGE_DOWN:
+                case KeyEvent.KEYCODE_CHANNEL_DOWN:
+                case KeyEvent.KEYCODE_MEDIA_NEXT:
+                    reader.step(+1);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                case KeyEvent.KEYCODE_PAGE_UP:
+                case KeyEvent.KEYCODE_CHANNEL_UP:
+                case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                    reader.step(-1);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                case KeyEvent.KEYCODE_MEDIA_REWIND:
+                    reader.fast(-1);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                    reader.fast(+1);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                    if (e.getRepeatCount() == 0) toggleMusic();
+                    return true;
+                case KeyEvent.KEYCODE_BACK:
+                case KeyEvent.KEYCODE_ESCAPE:
+                    if (e.getRepeatCount() == 0) {
+                        swallowBackUp = true;
+                        closeBook(true);
+                    }
+                    return true;
+                default:
+                    return super.dispatchKeyEvent(e);
+            }
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    private void toggleMusic() {
+        boolean on = !music.isEnabled();
+        music.setEnabled(on);
+        prefs.edit().putBoolean("music", on).apply();
+        updateMusicButton(!music.hasTracks());
+        if (reader.isOpen()) {
+            if (!music.hasTracks()) showToast("Nincs zene a pendrive-on");
+            else showToast(on ? "♪  Zene be" : "Zene ki");
+        }
+    }
+
+    private void updateMusicButton(boolean noTracks) {
+        if (musicBtn == null) return;
+        musicBtn.setVisibility(noTracks ? View.GONE : View.VISIBLE);
+        musicBtn.setText(music.isEnabled() ? "♪  Zene: be" : "♪  Zene: ki");
+    }
+
+    private void cycleScale() {
+        float cur = prefs.getFloat("scale", 1f);
+        int idx = 0;
+        for (int i = 0; i < SCALES.length; i++) if (Math.abs(SCALES[i] - cur) < 0.001f) idx = i;
+        float next = SCALES[(idx + 1) % SCALES.length];
+        prefs.edit().putFloat("scale", next).apply();
+        applyScale();
+    }
+
+    private void applyScale() {
+        float s = prefs.getFloat("scale", 1f);
+        readerView.setImageScale(s);
+        sizeBtn.setText("Képméret: " + Math.round(s * 100) + "%");
+    }
+
+    private void showToast(String text) {
+        toast.setText(text);
+        toast.animate().cancel();
+        toast.setAlpha(0f);
+        toast.setVisibility(View.VISIBLE);
+        toast.animate().alpha(1f).setDuration(250).withEndAction(() ->
+                toast.animate().alpha(0f).setStartDelay(1400).setDuration(700)
+                        .withEndAction(() -> toast.setVisibility(View.GONE)).start()).start();
+    }
+
+    // ================================================================ előnézetek
+
+    @Override
+    public void onThumbReady(String key) {
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View child = grid.getChildAt(i);
+            Object tag = child.getTag();
+            if (tag instanceof Holder) {
+                Holder h = (Holder) tag;
+                if (key.equals(h.coverKey)) {
+                    Bitmap b = thumbs.get(h.coverNode);
+                    if (b != null) h.cover.setBitmap(b);
+                }
+            }
+        }
+        FilmStripView strip = (FilmStripView) readerLayer.getChildAt(1);
+        if (strip.getVisibility() == View.VISIBLE) strip.invalidate();
+    }
+
+    // ================================================================ felület
+
+    private int px(float v) {
+        return Math.round(v * unit);
+    }
+
+    private void buildUi() {
+        FrameLayout root = new FrameLayout(this);
+        GradientDrawable sky = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.rgb(22, 24, 38), Color.rgb(30, 26, 36), Color.rgb(36, 27, 24)});
+        root.setBackground(sky);
+
+        // ---- könyvtár
+        LinearLayout lib = new LinearLayout(this);
+        lib.setOrientation(LinearLayout.VERTICAL);
+        lib.setPadding(px(90), px(56), px(90), 0);
+        libraryLayer = lib;
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView title = new TextView(this);
+        title.setText("Esti mesék");
+        title.setTextColor(CREAM);
+        title.setTypeface(Typeface.create(Typeface.SERIF, Typeface.NORMAL));
+        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(58));
+        title.setLetterSpacing(0.02f);
+        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        musicBtn = makeButton("♪  Zene: be");
+        musicBtn.setOnClickListener(v -> toggleMusic());
+        musicBtn.setVisibility(View.GONE);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, px(64));
+        blp.leftMargin = px(20);
+        header.addView(musicBtn, blp);
+
+        sizeBtn = makeButton("Képméret: 100%");
+        sizeBtn.setOnClickListener(v -> cycleScale());
+        header.addView(sizeBtn, new LinearLayout.LayoutParams(blp));
+
+        lib.addView(header, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, px(110)));
+
+        grid = new GridView(this);
+        grid.setNumColumns(4);
+        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        grid.setHorizontalSpacing(px(34));
+        grid.setVerticalSpacing(px(30));
+        grid.setPadding(0, px(26), 0, px(60));
+        grid.setClipToPadding(false);
+        grid.setSelector(new ColorDrawable(Color.TRANSPARENT));
+        grid.setVerticalScrollBarEnabled(false);
+        grid.setFocusable(true);
+        adapter = new BooksAdapter();
+        grid.setAdapter(adapter);
+        grid.setOnItemClickListener((p, v, pos, id) -> openBook(pos));
+        grid.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                selected = pos;
+                refreshHighlight();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> p) {
+                refreshHighlight();
+            }
+        });
+        grid.setOnFocusChangeListener((v, has) -> refreshHighlight());
+        lib.addView(grid, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        root.addView(lib, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // ---- üzenet (nincs pendrive, engedély, stb.)
+        messageLayer = new LinearLayout(this);
+        messageLayer.setOrientation(LinearLayout.VERTICAL);
+        messageLayer.setGravity(Gravity.CENTER);
+        messageText = new TextView(this);
+        messageText.setTextColor(CREAM);
+        messageText.setGravity(Gravity.CENTER);
+        messageText.setTypeface(Typeface.SERIF);
+        messageText.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(40));
+        messageText.setLineSpacing(px(10), 1f);
+        messageLayer.addView(messageText);
+        actionBtn = makeButton("");
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, px(72));
+        alp.topMargin = px(40);
+        messageLayer.addView(actionBtn, alp);
+        messageLayer.setVisibility(View.GONE);
+        root.addView(messageLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // ---- olvasó
+        readerLayer = new FrameLayout(this);
+        readerLayer.setBackgroundColor(Color.rgb(8, 7, 6));
+        readerView = new ReaderView(this);
+        readerLayer.addView(readerView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        FilmStripView strip = new FilmStripView(this);
+        readerLayer.addView(strip, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, px(330), Gravity.BOTTOM));
+        toast = new TextView(this);
+        toast.setTextColor(CREAM);
+        toast.setTypeface(Typeface.SERIF);
+        toast.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(34));
+        toast.setPadding(px(30), px(14), px(30), px(14));
+        GradientDrawable tbg = new GradientDrawable();
+        tbg.setColor(Color.argb(170, 20, 16, 12));
+        tbg.setCornerRadius(px(40));
+        toast.setBackground(tbg);
+        toast.setVisibility(View.GONE);
+        FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.END);
+        tlp.setMargins(0, px(40), px(50), 0);
+        readerLayer.addView(toast, tlp);
+        readerLayer.setVisibility(View.GONE);
+        root.addView(readerLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        setContentView(root);
+    }
+
+    private Button makeButton(String text) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setAllCaps(false);
+        b.setTextColor(CREAM);
+        b.setTypeface(Typeface.SERIF);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(28));
+        b.setPadding(px(30), 0, px(30), 0);
+        b.setFocusable(true);
+        GradientDrawable normal = new GradientDrawable();
+        normal.setCornerRadius(px(32));
+        normal.setColor(Color.argb(60, 255, 240, 210));
+        GradientDrawable focused = new GradientDrawable();
+        focused.setCornerRadius(px(32));
+        focused.setColor(Color.argb(110, 232, 200, 138));
+        focused.setStroke(Math.max(2, px(3)), CANDLE);
+        StateListDrawable sl = new StateListDrawable();
+        sl.addState(new int[]{android.R.attr.state_focused}, focused);
+        sl.addState(new int[]{android.R.attr.state_pressed}, focused);
+        sl.addState(new int[]{}, normal);
+        b.setBackground(sl);
+        b.setStateListAnimator(null);
+        return b;
+    }
+
+    private void showMessage(String text, String action, Runnable onAction) {
+        messageText.setText(text);
+        if (action != null) {
+            actionBtn.setText(action);
+            actionBtn.setOnClickListener(v -> onAction.run());
+            actionBtn.setVisibility(View.VISIBLE);
+            actionBtn.requestFocus();
+        } else {
+            actionBtn.setVisibility(View.GONE);
+        }
+        messageLayer.setVisibility(View.VISIBLE);
+        grid.setVisibility(View.INVISIBLE);
+    }
+
+    private void hideMessage() {
+        messageLayer.setVisibility(View.GONE);
+        grid.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshHighlight() {
+        boolean focused = grid.hasFocus();
+        int first = grid.getFirstVisiblePosition();
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View child = grid.getChildAt(i);
+            boolean on = focused && first + i == selected;
+            Object tag = child.getTag();
+            if (tag instanceof Holder) {
+                Holder h = (Holder) tag;
+                h.cover.setHighlighted(on);
+                h.title.setTextColor(on ? CREAM : MUTED);
+            }
+            float s = on ? 1.06f : 1f;
+            child.animate().scaleX(s).scaleY(s).setDuration(260)
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        }
+    }
+
+    // ================================================================ borítórács
+
+    private static final class Holder {
+        CoverView cover;
+        TextView title;
+        Node coverNode;
+        String coverKey;
+    }
+
+    private final class BooksAdapter extends BaseAdapter {
+        @Override
+        public int getCount() {
+            return books.size();
+        }
+
+        @Override
+        public Object getItem(int i) {
+            return books.get(i);
+        }
+
+        @Override
+        public long getItemId(int i) {
+            return i;
+        }
+
+        @Override
+        public View getView(int pos, View convert, ViewGroup parent) {
+            Holder h;
+            if (convert == null) {
+                LinearLayout cell = new LinearLayout(MainActivity.this);
+                cell.setOrientation(LinearLayout.VERTICAL);
+                cell.setGravity(Gravity.CENTER_HORIZONTAL);
+                h = new Holder();
+                h.cover = new CoverView(MainActivity.this);
+                cell.addView(h.cover, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, px(300)));
+                h.title = new TextView(MainActivity.this);
+                h.title.setTextColor(MUTED);
+                h.title.setTypeface(Typeface.SERIF);
+                h.title.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(27));
+                h.title.setGravity(Gravity.CENTER_HORIZONTAL);
+                h.title.setMaxLines(2);
+                h.title.setEllipsize(TextUtils.TruncateAt.END);
+                h.title.setPadding(px(8), px(6), px(8), 0);
+                cell.addView(h.title, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, px(84)));
+                cell.setTag(h);
+                convert = cell;
+            } else {
+                h = (Holder) convert.getTag();
+            }
+            Library.Book b = books.get(pos);
+            h.coverNode = b.pages.get(0);
+            h.coverKey = ThumbCache.keyOf(h.coverNode);
+            Bitmap bmp = thumbs.get(h.coverNode);
+            if (bmp == null) thumbs.request(h.coverNode, true);
+            int saved = Reader.savedPage(prefs, b);
+            float progress = b.pages.size() > 1 && saved > 0
+                    ? Math.min(1f, (float) saved / (b.pages.size() - 1)) : 0f;
+            h.cover.bind(bmp, b.title, progress);
+            h.title.setText(b.title);
+            boolean on = grid.hasFocus() && pos == selected;
+            h.cover.setHighlighted(on);
+            h.title.setTextColor(on ? CREAM : MUTED);
+            convert.setScaleX(on ? 1.06f : 1f);
+            convert.setScaleY(on ? 1.06f : 1f);
+            return convert;
+        }
+    }
+}

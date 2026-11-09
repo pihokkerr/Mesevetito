@@ -11,15 +11,25 @@ android {
         minSdk 26
         // 30 = Android 11, a projektor rendszere
         targetSdk 30
-        versionCode 1
-        versionName '1.0'
+        // GitHub Actions futásszám → minden build újabb verzió, frissítésként települ
+        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+        versionName '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
+    }
+
+    // Állandó aláíró kulcs: így az új verzió a régi fölé települ (saját, privát app)
+    signingConfigs {
+        release {
+            storeFile file('mesevetito.jks')
+            storePassword 'mesevetito'
+            keyAlias 'mesevetito'
+            keyPassword 'mesevetito'
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
-            // Saját használatra: a debug kulccsal írjuk alá, így telepíthető
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 

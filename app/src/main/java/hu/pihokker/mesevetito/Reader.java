@@ -177,9 +177,12 @@ final class Reader {
         main.postDelayed(hideStrip, STRIP_HIDE_MS);
     }
 
-    private final Runnable hideStrip = () ->
-            strip.animate().alpha(0f).setDuration(600)
-                    .withEndAction(() -> strip.setVisibility(View.GONE)).start();
+    private final Runnable hideStrip = this::hideStripNow;
+
+    private void hideStripNow() {
+        strip.animate().alpha(0f).setDuration(600)
+                .withEndAction(() -> strip.setVisibility(View.GONE)).start();
+    }
 
     // ------------------------------------------------------------ betöltés, előtöltés
 

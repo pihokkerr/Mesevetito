@@ -13,7 +13,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
-/** A pendrive beolvasása: könyvek (képes mappák) és zenék. */
+/**
+ * A pendrive beolvasása.
+ * - Képes mappa = könyv.
+ * - Olyan mappa, amelyben könyvmappák vannak = gyűjtemény (pl. "Bogyó és Babóca").
+ * - Hangfájlok bárhol = háttérzene.
+ */
 final class Library {
 
     static final int OK = 0;
@@ -32,9 +37,36 @@ final class Library {
         }
     }
 
+    /** Gyűjtemény: könyvek egy mappában. */
+    static final class Shelf {
+        final String title;
+        final String key;
+        final List<Book> books;
+
+        Shelf(String title, String key, List<Book> books) {
+            this.title = title;
+            this.key = key;
+            this.books = books;
+        }
+    }
+
     int status = NO_USB;
-    final List<Book> books = new ArrayList<>();
+    final List<Shelf> shelves = new ArrayList<>();
+    final List<Book> books = new ArrayList<>();   // gyűjteményen kívüli könyvek
     final List<Node> music = new ArrayList<>();
+
+    /** A főképernyő elemei: előbb a gyűjtemények, aztán a különálló könyvek. */
+    List<Object> top() {
+        List<Object> out = new ArrayList<>(shelves.size() + books.size());
+        out.addAll(shelves);
+        out.addAll(books);
+        return out;
+    }
+
+    Shelf shelf(String key) {
+        for (Shelf s : shelves) if (s.key.equals(key)) return s;
+        return null;
+    }
 
     static Library scan(Context ctx) {
         Library lib = new Library();
@@ -66,37 +98,65 @@ final class Library {
             return lib;
         }
 
-        for (Node r : roots) walk(r, 0, lib);
+        for (Node r : roots) {
+            List<Node> kids = r.children();
+            if (kids != null) scanTop(kids, lib);
+        }
+
+        // Ha minden egyetlen gyűjtőmappában van (pl. "Mesék/"), az ne legyen külön szint
+        if (lib.books.isEmpty() && lib.shelves.size() == 1) {
+            lib.books.addAll(lib.shelves.remove(0).books);
+        }
+
+        Collections.sort(lib.shelves, (a, b) -> NaturalOrder.compare(a.title, b.title));
         Collections.sort(lib.books, (a, b) -> NaturalOrder.compare(a.title, b.title));
         Collections.sort(lib.music, (a, b) -> NaturalOrder.compare(a.name(), b.name()));
         lib.status = OK;
         return lib;
     }
 
-    private static void walk(Node dir, int depth, Library lib) {
-        List<Node> kids = dir.children();
-        if (kids == null) return;
+    private static void scanTop(List<Node> kids, Library lib) {
         for (Node k : kids) {
             if (!k.isDir() || isHidden(k.name())) continue;
             List<Node> files = k.children();
             if (files == null) continue;
-            List<Node> images = new ArrayList<>();
-            List<Node> audio = new ArrayList<>();
-            for (Node f : files) {
-                if (f.isDir() || f.name().startsWith(".")) continue;
-                if (isImage(f.name())) images.add(f);
-                else if (isAudio(f.name())) audio.add(f);
+            Book b = bookOf(k, files, lib.music);
+            if (b != null) {
+                lib.books.add(b);
+                continue;
             }
-            if (!images.isEmpty()) {
-                Collections.sort(images, (a, b) -> NaturalOrder.compare(a.name(), b.name()));
-                lib.books.add(new Book(k.name(), images, k.key()));
-            } else if (!audio.isEmpty()) {
-                lib.music.addAll(audio);
-            } else if (depth < 2) {
-                // pl. egy "Mesék" gyűjtőmappa: belenézünk
-                walk(k, depth + 1, lib);
+            List<Book> inner = new ArrayList<>();
+            gather(files, 1, inner, lib.music);
+            if (!inner.isEmpty()) {
+                Collections.sort(inner, (x, y) -> NaturalOrder.compare(x.title, y.title));
+                lib.shelves.add(new Shelf(k.name(), k.key(), inner));
             }
         }
+    }
+
+    /** Egy gyűjtemény összes könyve, az almappákat is beleértve (laposan). */
+    private static void gather(List<Node> kids, int depth, List<Book> out, List<Node> music) {
+        for (Node k : kids) {
+            if (!k.isDir() || isHidden(k.name())) continue;
+            List<Node> files = k.children();
+            if (files == null) continue;
+            Book b = bookOf(k, files, music);
+            if (b != null) out.add(b);
+            else if (depth < 3) gather(files, depth + 1, out, music);
+        }
+    }
+
+    /** Könyv, ha a mappában képek vannak; a talált hangfájlokat a zenékhez teszi. */
+    private static Book bookOf(Node dir, List<Node> files, List<Node> music) {
+        List<Node> images = new ArrayList<>();
+        for (Node f : files) {
+            if (f.isDir() || f.name().startsWith(".")) continue;
+            if (isImage(f.name())) images.add(f);
+            else if (isAudio(f.name())) music.add(f);
+        }
+        if (images.isEmpty()) return null;
+        Collections.sort(images, (a, b) -> NaturalOrder.compare(a.name(), b.name()));
+        return new Book(dir.name(), images, dir.key());
     }
 
     private static boolean isHidden(String n) {

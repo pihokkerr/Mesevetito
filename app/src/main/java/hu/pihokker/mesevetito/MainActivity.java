@@ -78,7 +78,11 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     private ReaderView readerView;
     private TextView toast;
 
-    private final List<Library.Book> books = new ArrayList<>();
+    /** Ami épp a rácsban látszik: Library.Shelf (gyűjtemény) vagy Library.Book. */
+    private final List<Object> items = new ArrayList<>();
+    private Library library;
+    private Library.Shelf shelf;      // a megnyitott gyűjtemény, vagy null (főképernyő)
+    private TextView crumb;
     private BooksAdapter adapter;
     private int selected = 0;
     private int lastStatus = -1;
@@ -180,7 +184,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
             return;
         }
         scanning = true;
-        if (books.isEmpty()) showMessage("Könyvek keresése…", null, null);
+        if (items.isEmpty()) showMessage("Könyvek keresése…", null, null);
         scanner.execute(() -> {
             Library lib = Library.scan(this);
             main.post(() -> {
@@ -199,9 +203,12 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         music.setTracks(lib.music);
         updateMusicButton(lib.music.isEmpty());
 
-        String prevKey = selected < books.size() ? books.get(selected).key : null;
-        books.clear();
-        books.addAll(lib.books);
+        library = lib;
+        String prevKey = selected < items.size() ? keyOf(items.get(selected)) : null;
+        if (shelf != null) shelf = lib.shelf(shelf.key); // eltűnt? → vissza a főképernyőre
+        items.clear();
+        items.addAll(shelf != null ? shelf.books : lib.top());
+        updateCrumb();
         adapter.notifyDataSetChanged();
 
         if (lib.status == Library.NO_USB) {
@@ -212,7 +219,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
             showMessage("A pendrive olvasásához engedély kell.", "Engedélyezés", this::askPermission);
             return;
         }
-        if (books.isEmpty()) {
+        if (items.isEmpty()) {
             showMessage("Nem találtam könyvet a pendrive-on.\n"
                     + "Minden könyv egy mappa legyen, benne az oldalak képei.", null, null);
             return;
@@ -220,9 +227,9 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
 
         hideMessage();
         int sel = 0;
-        for (int i = 0; i < books.size(); i++) {
-            if (books.get(i).key.equals(prevKey)) sel = i;
-            thumbs.request(books.get(i).pages.get(0), i < 12);
+        for (int i = 0; i < items.size(); i++) {
+            if (keyOf(items.get(i)).equals(prevKey)) sel = i;
+            requestCovers(items.get(i), i < 12);
         }
         selected = sel;
         if (!reader.isOpen()) {
@@ -272,12 +279,77 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         }
     }
 
+    // ================================================================ gyűjtemények
+
+    private static String keyOf(Object o) {
+        return o instanceof Library.Shelf ? ((Library.Shelf) o).key : ((Library.Book) o).key;
+    }
+
+    /** A gyűjtemény mozaikjához: az első (max. 4) könyv borítója. */
+    private static List<Node> coverNodes(Library.Shelf s) {
+        List<Node> out = new ArrayList<>(4);
+        for (int i = 0; i < s.books.size() && i < 4; i++) out.add(s.books.get(i).pages.get(0));
+        return out;
+    }
+
+    private void requestCovers(Object o, boolean urgent) {
+        if (o instanceof Library.Shelf) {
+            for (Node n : coverNodes((Library.Shelf) o)) thumbs.request(n, urgent);
+        } else {
+            thumbs.request(((Library.Book) o).pages.get(0), urgent);
+        }
+    }
+
+    private void activate(int pos) {
+        if (pos < 0 || pos >= items.size() || reader.isOpen()) return;
+        Object o = items.get(pos);
+        if (o instanceof Library.Shelf) enterShelf((Library.Shelf) o);
+        else openBook(pos);
+    }
+
+    private void enterShelf(Library.Shelf s) {
+        shelf = s;
+        showItems(new ArrayList<>(s.books), 0);
+    }
+
+    private void exitShelf() {
+        if (shelf == null || library == null) return;
+        String key = shelf.key;
+        shelf = null;
+        List<Object> top = library.top();
+        int sel = 0;
+        for (int i = 0; i < top.size(); i++) if (keyOf(top.get(i)).equals(key)) sel = i;
+        showItems(top, sel);
+    }
+
+    /** Csendes áttűnés a főképernyő és egy gyűjtemény között. */
+    private void showItems(List<?> list, int sel) {
+        grid.animate().cancel();
+        grid.animate().alpha(0f).setDuration(200).withEndAction(() -> {
+            items.clear();
+            items.addAll(list);
+            selected = sel;
+            adapter.notifyDataSetChanged();
+            updateCrumb();
+            for (int i = 0; i < items.size(); i++) requestCovers(items.get(i), i < 12);
+            grid.requestFocus();
+            grid.setSelection(sel);
+            grid.animate().alpha(1f).setDuration(380)
+                    .setInterpolator(new DecelerateInterpolator()).start();
+        }).start();
+    }
+
+    private void updateCrumb() {
+        if (crumb != null) crumb.setText(shelf != null ? "‹   " + shelf.title : "");
+    }
+
     // ================================================================ könyv nyitása / zárása
 
     private void openBook(int pos) {
-        if (pos < 0 || pos >= books.size() || reader.isOpen()) return;
+        if (pos < 0 || pos >= items.size() || reader.isOpen()) return;
+        if (!(items.get(pos) instanceof Library.Book)) return;
         selected = pos;
-        Library.Book b = books.get(pos);
+        Library.Book b = (Library.Book) items.get(pos);
         readerLayer.setAlpha(0f);
         readerLayer.setVisibility(View.VISIBLE);
         readerView.setScaleX(1.04f);
@@ -366,6 +438,13 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
                     return super.dispatchKeyEvent(e);
             }
         }
+        if (shelf != null && (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE)) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
+                swallowBackUp = true;
+                exitShelf();
+            }
+            return true;
+        }
         return super.dispatchKeyEvent(e);
     }
 
@@ -424,6 +503,11 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
                     Bitmap b = thumbs.get(h.coverNode);
                     if (b != null) h.cover.setBitmap(b);
                 }
+                if (h.tileKeys != null) {
+                    for (int j = 0; j < h.tileKeys.length; j++) {
+                        if (key.equals(h.tileKeys[j])) h.cover.setTile(j, thumbs.get(h.tileNodes[j]));
+                    }
+                }
             }
         }
         FilmStripView strip = (FilmStripView) readerLayer.getChildAt(1);
@@ -450,7 +534,16 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        crumb = new TextView(this);
+        crumb.setTextColor(MUTED);
+        crumb.setTypeface(LIGHT);
+        crumb.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(32));
+        crumb.setLetterSpacing(0.03f);
+        crumb.setSingleLine(true);
+        crumb.setEllipsize(TextUtils.TruncateAt.END);
+        header.addView(crumb, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         musicBtn = makeButton("♪  Zene: be");
         musicBtn.setOnClickListener(v -> toggleMusic());
@@ -479,7 +572,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         grid.setFocusable(true);
         adapter = new BooksAdapter();
         grid.setAdapter(adapter);
-        grid.setOnItemClickListener((p, v, pos, id) -> openBook(pos));
+        grid.setOnItemClickListener((p, v, pos, id) -> activate(pos));
         grid.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
@@ -622,17 +715,19 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         TextView title;
         Node coverNode;
         String coverKey;
+        Node[] tileNodes;
+        String[] tileKeys;
     }
 
     private final class BooksAdapter extends BaseAdapter {
         @Override
         public int getCount() {
-            return books.size();
+            return items.size();
         }
 
         @Override
         public Object getItem(int i) {
-            return books.get(i);
+            return items.get(i);
         }
 
         @Override
@@ -668,7 +763,32 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
             } else {
                 h = (Holder) convert.getTag();
             }
-            Library.Book b = books.get(pos);
+            Object item = items.get(pos);
+            if (item instanceof Library.Shelf) {
+                Library.Shelf sh = (Library.Shelf) item;
+                List<Node> ns = coverNodes(sh);
+                h.coverNode = null;
+                h.coverKey = null;
+                h.tileNodes = ns.toArray(new Node[0]);
+                h.tileKeys = new String[ns.size()];
+                Bitmap[] tiles = new Bitmap[ns.size()];
+                for (int j = 0; j < ns.size(); j++) {
+                    h.tileKeys[j] = ThumbCache.keyOf(ns.get(j));
+                    tiles[j] = thumbs.get(ns.get(j));
+                    if (tiles[j] == null) thumbs.request(ns.get(j), true);
+                }
+                h.cover.bindMosaic(tiles, sh.books.size(), sh.title);
+                h.title.setText(sh.title + "   ·   " + sh.books.size());
+                boolean on = grid.hasFocus() && pos == selected;
+                h.cover.setHighlighted(on);
+                h.title.setTextColor(on ? CREAM : MUTED);
+                convert.setScaleX(on ? 1.04f : 1f);
+                convert.setScaleY(on ? 1.04f : 1f);
+                return convert;
+            }
+            Library.Book b = (Library.Book) item;
+            h.tileNodes = null;
+            h.tileKeys = null;
             h.coverNode = b.pages.get(0);
             h.coverKey = ThumbCache.keyOf(h.coverNode);
             Bitmap bmp = thumbs.get(h.coverNode);

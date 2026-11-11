@@ -5,7 +5,7 @@ Esti diavetítő szkennelt mesekönyvekhez Android-projektorra (Magcubic HY310x,
 ## Pendrive
 - Minden könyv egy mappa, benne az oldalak képei (jpg/png/webp). A mappa neve a cím, az első kép a borító. Az oldalak a fájlnév szerint, természetes sorrendben jönnek (Oldal_2 a 10 előtt).
 - A zenék egy külön mappában (pl. `Zene`), mp3/m4a/ogg/flac/wav.
-- Egy gyűjtőmappába (pl. `Mesék/`) is tehetők a könyvek.
+- **Gyűjtemények:** ha egy mappában könyvmappák vannak (pl. `Bogyó és Babóca/`, `Karácsony/`), az a könyvtárban gyűjteményként jelenik meg, a borítója a benne lévő könyvek mozaikja. OK-val belépsz, Vissza gombbal kilépsz. Ha minden könyv egyetlen gyűjtőmappában van (pl. `Mesék/`), az nem lesz külön szint.
 
 ## Távirányító
 | Gomb | Könyvtárban | Könyvben |

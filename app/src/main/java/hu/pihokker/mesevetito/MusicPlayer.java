@@ -67,8 +67,9 @@ final class MusicPlayer {
     private boolean sameTracks(List<Node> nodes) {
         if (nodes.size() != tracks.size()) return false;
         java.util.Set<String> a = new java.util.HashSet<>();
-        for (Node n : tracks) a.add(n.key());
-        for (Node n : nodes) if (!a.contains(n.key())) return false;
+        // név + méret + dátum: egy azonos nevű, de lecserélt fájl is újnak számít
+        for (Node n : tracks) a.add(n.key() + "|" + n.size() + "|" + n.modified());
+        for (Node n : nodes) if (!a.contains(n.key() + "|" + n.size() + "|" + n.modified())) return false;
         return true;
     }
 

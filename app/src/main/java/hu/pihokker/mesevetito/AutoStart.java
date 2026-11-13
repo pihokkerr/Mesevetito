@@ -13,8 +13,9 @@ import android.provider.Settings;
  * Bedugáskor kicsit vár, hogy a rendszer "mit tegyek a pendrive-val?" ablaka már
  * megjelenjen, és utána hozza előre az appot, így az ablak a háttérbe kerül.
  *
- * Android 10 felett háttérből csak "megjelenítés más alkalmazások felett"
- * engedéllyel indulhat app – ezt a Beállításokban kell egyszer megadni.
+ * Android 10 felett háttérből csak külön engedéllyel indulhat app: "megjelenítés más
+ * alkalmazások felett", vagy – ahol ez le van tiltva (kevés memóriájú eszköz) – a
+ * bekapcsolt kisegítő szolgáltatás (Starter).
  */
 public final class AutoStart extends BroadcastReceiver {
 
@@ -25,7 +26,7 @@ public final class AutoStart extends BroadcastReceiver {
     }
 
     static boolean permitted(Context c) {
-        return Build.VERSION.SDK_INT < 29 || Settings.canDrawOverlays(c);
+        return Build.VERSION.SDK_INT < 29 || Settings.canDrawOverlays(c) || Starter.isOn(c);
     }
 
     @Override

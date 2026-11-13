@@ -34,6 +34,19 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".Starter"
+            android:exported="true"
+            android:label="@string/starter_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/starter" />
+        </service>
+
         <receiver
             android:name=".AutoStart"
             android:exported="true">

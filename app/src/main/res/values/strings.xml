@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="starter_label">Mesevetítő – automatikus indítás</string>
+    <string name="starter_desc">Elindítja a Mesevetítőt a projektor bekapcsolásakor és pendrive bedugásakor, hogy a rendszer pendrive-ablaka a háttérbe kerüljön. Semmit nem olvas és nem figyel a képernyőn.</string>
+</resources>

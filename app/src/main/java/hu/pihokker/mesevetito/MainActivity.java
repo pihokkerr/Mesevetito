@@ -514,7 +514,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
                             SPEEDS[i] / 1000f).replace('.', ',') + " mp)";
                 },
                 (dir, wrap) -> {
-                    int i = speedIndex() + dir;
+                    int i = speedIndex() - dir; // jobbra = gyorsabb
                     if (wrap) i = (i + SPEEDS.length) % SPEEDS.length;
                     i = Math.max(0, Math.min(SPEEDS.length - 1, i));
                     prefs.edit().putInt("speed", i).apply();
@@ -523,9 +523,8 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         addRow("Képméret",
                 () -> scalePct() + " %",
                 (dir, wrap) -> {
-                    // jobbra / OK: kisebb kép
-                    int pct = scalePct() - dir * SCALE_STEP;
-                    if (wrap && pct < SCALE_MIN) pct = 100;
+                    int pct = scalePct() + dir * SCALE_STEP; // jobbra = nagyobb
+                    if (wrap && pct > 100) pct = SCALE_MIN;
                     pct = Math.max(SCALE_MIN, Math.min(100, pct));
                     prefs.edit().putFloat("scale", pct / 100f).apply();
                     applyScale();
@@ -533,9 +532,13 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         addRow("Automatikus indítás",
                 () -> {
                     if (!AutoStart.enabled(this)) return "ki";
-                    return AutoStart.permitted(this) ? "be" : "be – engedély kell";
+                    return AutoStart.permitted(this) ? "be" : "be – engedély kell (OK)";
                 },
                 (dir, wrap) -> {
+                    if (wrap && AutoStart.enabled(this) && !AutoStart.permitted(this)) {
+                        requestOverlayPermission(); // OK: engedély-képernyő újra
+                        return;
+                    }
                     boolean on = !AutoStart.enabled(this);
                     prefs.edit().putBoolean(AutoStart.PREF, on).apply();
                     if (on && !AutoStart.permitted(this)) requestOverlayPermission();
@@ -643,6 +646,17 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     }
 
     private void requestOverlayPermission() {
+        android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        if (am.isLowRamDevice()) {
+            // itt a "más appok felett" engedély le van tiltva → kisegítő szolgáltatás
+            settingsHint.setText("Kisegítő lehetőségek → „Mesevetítő – automatikus indítás” → be");
+            try {
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            } catch (ActivityNotFoundException e) {
+                settingsHint.setText("Ezen a projektoron nem érhetők el a Kisegítő lehetőségek.");
+            }
+            return;
+        }
         try {
             startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName())));

@@ -28,6 +28,10 @@ jobs:
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk Mesevetito.apk
 
+      # az app ebből látja, van-e újabb verzió
+      - name: Version file
+        run: echo "${{ github.run_number }}" > version.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: Mesevetito
@@ -41,4 +45,6 @@ jobs:
           name: Legfrissebb build
           body: "Build: ${{ github.sha }}"
           prerelease: true
-          files: Mesevetito.apk
+          files: |
+            Mesevetito.apk
+            version.txt

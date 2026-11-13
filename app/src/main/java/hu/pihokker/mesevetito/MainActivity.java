@@ -78,6 +78,8 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     private LinearLayout settingsRows;
     private TextView settingsHint;
     private final List<Row> rows = new ArrayList<>();
+    private Updater updater;
+    private String updateState = "OK: keresés";
     private LinearLayout messageLayer;
     private TextView messageText;
     private Button actionBtn;
@@ -108,6 +110,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         thumbs.addListener(this);
         music = new MusicPlayer(this);
         music.setEnabled(prefs.getBoolean("music", true));
+        updater = new Updater(this);
 
         DisplayMetrics dm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(dm);
@@ -127,6 +130,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         f.addAction(Intent.ACTION_MEDIA_BAD_REMOVAL);
         f.addDataScheme("file");
         registerReceiver(usbReceiver, f);
+        registerReceiver(installReceiver, new IntentFilter(Updater.ACTION_RESULT));
 
         if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -163,6 +167,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         super.onDestroy();
         try {
             unregisterReceiver(usbReceiver);
+            unregisterReceiver(installReceiver);
         } catch (Exception ignored) {
         }
         music.destroy();
@@ -191,6 +196,36 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     };
 
     private final Runnable delayedRescan = this::rescan;
+
+    /** A rendszer telepítőjének visszajelzése a frissítésről. */
+    private final BroadcastReceiver installReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            int status = i.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999);
+            if (status == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
+                if (confirm != null) {
+                    confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    try {
+                        startActivity(confirm);
+                        setUpdateState("telepítés: erősítsd meg a felugró ablakban");
+                    } catch (Exception e) {
+                        setUpdateState("a telepítő nem indult el");
+                    }
+                }
+            } else if (status == android.content.pm.PackageInstaller.STATUS_SUCCESS) {
+                setUpdateState("kész");
+            } else if (status != -999) {
+                String m = i.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
+                setUpdateState("nem sikerült" + (m != null ? ": " + m : ""));
+            }
+        }
+    };
+
+    private void setUpdateState(String s) {
+        updateState = s;
+        refreshSettings();
+    }
 
     private long stoppedAt = -1; // mikor került háttérbe (−1: épp látszik)
 
@@ -560,6 +595,16 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         addRow("Automatikus indítás",
                 () -> isDefaultHome() ? "be  (a Mesevetítő a főképernyő)" : "ki",
                 (dir, wrap) -> openHomeSettings());
+        addRow("Frissítés",
+                () -> updateState,
+                (dir, wrap) -> {
+                    if (!wrap || updater.isBusy()) return; // csak OK-ra
+                    if (updater.updateAvailable()) updater.downloadAndInstall(this::setUpdateState);
+                    else {
+                        setUpdateState("keresés…");
+                        updater.check(this::setUpdateState);
+                    }
+                });
         addRow("A projektor saját menüje",
                 () -> "megnyitás",
                 (dir, wrap) -> {
@@ -631,6 +676,10 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         settingsLayer.setVisibility(View.VISIBLE);
         settingsLayer.animate().alpha(1f).setDuration(260).start();
         rows.get(0).view.requestFocus();
+        if (!updater.isBusy() && !updater.updateAvailable()) {
+            updateState = "keresés…  (" + updater.localName() + ")";
+            updater.check(this::setUpdateState);
+        }
     }
 
     private void closeSettings() {

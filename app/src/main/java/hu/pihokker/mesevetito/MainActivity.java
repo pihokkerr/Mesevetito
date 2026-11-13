@@ -139,6 +139,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     @Override
     protected void onStart() {
         super.onStart();
+        stoppedAt = -1;
         music.setForeground(true);
     }
 
@@ -153,6 +154,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     @Override
     protected void onStop() {
         super.onStop();
+        stoppedAt = android.os.SystemClock.elapsedRealtime();
         music.setForeground(false);
     }
 
@@ -178,12 +180,34 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
             if (!Intent.ACTION_MEDIA_MOUNTED.equals(i.getAction()) && reader.isOpen()) {
                 closeBook(false);
             }
+            if (Intent.ACTION_MEDIA_MOUNTED.equals(i.getAction()) && wasForeground()) {
+                // a rendszer "mit tegyek a pendrive-val?" ablaka után visszajövünk előre
+                main.postDelayed(bringBack, 1500);
+                main.postDelayed(bringBack, 4000);
+            }
             main.removeCallbacks(delayedRescan);
             main.postDelayed(delayedRescan, 900);
         }
     };
 
     private final Runnable delayedRescan = this::rescan;
+
+    private long stoppedAt = -1; // mikor került háttérbe (−1: épp látszik)
+
+    /** Látszik az app, vagy csak most (pár másodperce) takarta el valami. */
+    private boolean wasForeground() {
+        return stoppedAt < 0 || android.os.SystemClock.elapsedRealtime() - stoppedAt < 8000;
+    }
+
+    private final Runnable bringBack = () -> {
+        if (stoppedAt < 0) return; // már elöl vagyunk
+        try {
+            Intent i = new Intent(this, MainActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Exception ignored) {
+        }
+    };
 
     // ================================================================ beolvasás
 

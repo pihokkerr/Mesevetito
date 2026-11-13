@@ -1,183 +1,219 @@
 package hu.pihokker.mesevetito;
 
-import android.animation.ValueAnimator;
+import android.animation.TimeInterpolator;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.ColorMatrix;
-import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Paint;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.view.View;
-import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
+import android.view.animation.PathInterpolator;
+import android.widget.FrameLayout;
 
 /**
- * Az oldalak kirajzolása. Lapozáskor a két kép egy filmcsíkként mozog:
- * a régi felfelé kiúszik, az új alulról beúszik, egyszerre.
+ * Az oldalak megjelenítése. Két külön képréteg van; lapozáskor nem rajzolunk újra semmit,
+ * csak a rétegek helyzetét mozgatja a grafikus chip (translationY) – ez a gyenge
+ * projektoron is egyenletes. A régi oldal felfelé kiúszik, az új alulról beúszik, egyszerre.
  */
-final class ReaderView extends View {
+final class ReaderView extends FrameLayout {
 
-    static final long SLIDE_MS = 1500;
-
-    private static final int NONE = 0, SLIDE_FWD = 1, SLIDE_BACK = 2, FADE = 3;
     private static final int BG = Color.rgb(8, 7, 6);
 
-    private Bitmap cur, other;
-    private int mode = NONE;
-    private float p;
-    private float imageScale = 1f;
-    private ValueAnimator anim;
+    /** Egy oldal: a kép középre, arányosan, a beállított méretben. */
+    private static final class PageView extends View {
+        Bitmap bitmap;
+        float scale = 1f;
+        private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+        private final RectF dst = new RectF();
 
-    private final Paint bmpPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
-    private final Paint vignette = new Paint();
-    private final RectF dst = new RectF();
+        PageView(Context c) {
+            super(c);
+            setFocusable(false);
+        }
+
+        void setBitmap(Bitmap b) {
+            bitmap = b;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            if (bitmap == null) return;
+            float bw = getWidth() * scale, bh = getHeight() * scale;
+            float s = Math.min(bw / bitmap.getWidth(), bh / bitmap.getHeight());
+            float iw = bitmap.getWidth() * s, ih = bitmap.getHeight() * s;
+            float l = (getWidth() - iw) / 2f, t = (getHeight() - ih) / 2f;
+            dst.set(l, t, l + iw, t + ih);
+            c.drawBitmap(bitmap, null, dst, paint);
+        }
+    }
+
+    /** Enyhe sötétedés a szélek felé, mint egy vetített diánál. Egyszer rajzolódik. */
+    private static final class Vignette extends View {
+        private final Paint p = new Paint();
+
+        Vignette(Context c) {
+            super(c);
+            setFocusable(false);
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int ow, int oh) {
+            float r = (float) Math.hypot(w / 2f, h / 2f);
+            p.setShader(new RadialGradient(w / 2f, h / 2f, r,
+                    new int[]{0x00000000, 0x00000000, 0x8C000000},
+                    new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            c.drawRect(0, 0, getWidth(), getHeight(), p);
+        }
+    }
+
+    // lágy indulás és nagyon lassú megérkezés, mint a kézzel tekert diafilm
+    private static final TimeInterpolator FILM = new PathInterpolator(0.42f, 0f, 0.22f, 1f);
+
+    private final PageView[] pages = new PageView[2];
+    private int front = 0;
+    private long slideMs = 2600;
+    private boolean animating;
+    private int token;
+    private Runnable pendingDone;
 
     ReaderView(Context c) {
         super(c);
         setBackgroundColor(BG);
-        // enyhén meleg tónus, mint a vetített diánál
-        ColorMatrix cm = new ColorMatrix();
-        cm.setScale(1f, 0.97f, 0.9f, 1f);
-        bmpPaint.setColorFilter(new ColorMatrixColorFilter(cm));
         setFocusable(false);
+        for (int i = 0; i < 2; i++) {
+            pages[i] = new PageView(c);
+            addView(pages[i], new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        }
+        pages[1].setVisibility(INVISIBLE);
+        Vignette v = new Vignette(c);
+        v.setLayerType(LAYER_TYPE_HARDWARE, null); // kész textúra, nem rajzolódik újra
+        addView(v, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+    }
+
+    void setSlideMs(long ms) {
+        slideMs = ms;
     }
 
     void setImageScale(float s) {
-        imageScale = s;
-        invalidate();
-    }
-
-    @Override
-    protected void onSizeChanged(int w, int h, int ow, int oh) {
-        float r = (float) Math.hypot(w / 2f, h / 2f);
-        vignette.setShader(new RadialGradient(w / 2f, h / 2f, r,
-                new int[]{0x00000000, 0x00000000, 0x8C000000},
-                new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+        for (PageView p : pages) {
+            p.scale = s;
+            p.invalidate();
+        }
     }
 
     boolean isAnimating() {
-        return anim != null && anim.isRunning();
+        return animating;
     }
 
     Bitmap current() {
-        return cur;
+        return pages[front].bitmap;
+    }
+
+    private PageView cur() {
+        return pages[front];
+    }
+
+    private PageView back() {
+        return pages[1 - front];
     }
 
     void setPage(Bitmap b) {
         cancel();
-        cur = b;
-        other = null;
-        mode = NONE;
-        invalidate();
+        PageView c = cur();
+        c.setBitmap(b);
+        c.setTranslationY(0);
+        c.setAlpha(1f);
+        c.setVisibility(VISIBLE);
+        back().setBitmap(null);
+        back().setVisibility(INVISIBLE);
     }
 
     void slideTo(Bitmap b, boolean forward, Runnable done) {
-        if (cur == null) {
+        if (cur().bitmap == null) {
             setPage(b);
             if (done != null) done.run();
             return;
         }
         cancel();
-        other = b;
-        mode = forward ? SLIDE_FWD : SLIDE_BACK;
-        run(SLIDE_MS, new AccelerateDecelerateInterpolator(), done);
+        final float dist = getHeight() * 1.06f; // kis fekete sáv a két kocka között
+        final PageView out = cur(), in = back();
+        in.setBitmap(b);
+        in.setAlpha(1f);
+        in.setTranslationY(forward ? dist : -dist);
+        in.setVisibility(VISIBLE);
+        animating = true;
+        pendingDone = done;
+        final int t = ++token;
+        // két képkockányi várakozás: addig a chip feltölti az új képet, így az indulás nem akad
+        postOnAnimation(() -> postOnAnimation(() -> {
+            if (t != token) return;
+            out.animate().translationY(forward ? -dist : dist)
+                    .setDuration(slideMs).setInterpolator(FILM).start();
+            in.animate().translationY(0)
+                    .setDuration(slideMs).setInterpolator(FILM)
+                    .withEndAction(() -> {
+                        if (t == token) finish();
+                    }).start();
+        }));
     }
 
     void fadeTo(Bitmap b, long ms, Runnable done) {
-        if (cur == null) {
+        if (cur().bitmap == null) {
             setPage(b);
             if (done != null) done.run();
             return;
         }
         cancel();
-        other = b;
-        mode = FADE;
-        run(ms, new DecelerateInterpolator(), done);
+        final PageView in = back();
+        in.setBitmap(b);
+        in.setTranslationY(0);
+        in.setAlpha(0f);
+        in.setVisibility(VISIBLE);
+        animating = true;
+        pendingDone = done;
+        final int t = ++token;
+        postOnAnimation(() -> {
+            if (t != token) return;
+            in.animate().alpha(1f).setDuration(ms).setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(() -> {
+                        if (t == token) finish();
+                    }).start();
+        });
     }
 
-    private void run(long ms, android.animation.TimeInterpolator ip, Runnable done) {
-        anim = ValueAnimator.ofFloat(0f, 1f);
-        anim.setDuration(ms);
-        anim.setInterpolator(ip);
-        anim.addUpdateListener(a -> {
-            p = (float) a.getAnimatedValue();
-            invalidate();
-        });
-        anim.addListener(new android.animation.AnimatorListenerAdapter() {
-            boolean cancelled;
-
-            @Override
-            public void onAnimationCancel(android.animation.Animator a) {
-                cancelled = true;
-            }
-
-            @Override
-            public void onAnimationEnd(android.animation.Animator a) {
-                if (cancelled) return;
-                cur = other;
-                other = null;
-                mode = NONE;
-                p = 0f;
-                invalidate();
-                if (done != null) done.run();
-            }
-        });
-        anim.start();
+    /** Az animáció vége: a beúszott oldal lesz az aktuális. */
+    private void finish() {
+        PageView old = cur();
+        front = 1 - front;
+        old.animate().cancel();
+        old.setVisibility(INVISIBLE);
+        old.setBitmap(null);
+        old.setTranslationY(0);
+        old.setAlpha(1f);
+        PageView c = cur();
+        c.setTranslationY(0);
+        c.setAlpha(1f);
+        animating = false;
+        Runnable d = pendingDone;
+        pendingDone = null;
+        if (d != null) d.run();
     }
 
+    /** Futó animáció azonnali befejezése (pl. könyv bezárásakor). */
     private void cancel() {
-        if (anim != null) {
-            anim.cancel();
-            anim = null;
-        }
-        if (other != null) {
-            cur = other;
-            other = null;
-        }
-        mode = NONE;
-        p = 0f;
-    }
-
-    @Override
-    protected void onDraw(Canvas c) {
-        int w = getWidth(), h = getHeight();
-        if (w == 0 || h == 0) return;
-        float gap = h * 0.06f;      // fekete sáv a két kocka között
-        float dist = h + gap;
-        float dy = p * dist;
-
-        switch (mode) {
-            case SLIDE_FWD:
-                draw(c, cur, -dy, 255);
-                draw(c, other, dist - dy, 255);
-                break;
-            case SLIDE_BACK:
-                draw(c, cur, dy, 255);
-                draw(c, other, -dist + dy, 255);
-                break;
-            case FADE:
-                draw(c, cur, 0, Math.round(255 * (1 - p)));
-                draw(c, other, 0, Math.round(255 * p));
-                break;
-            default:
-                draw(c, cur, 0, 255);
-        }
-        c.drawRect(0, 0, w, h, vignette);
-    }
-
-    private void draw(Canvas c, Bitmap b, float dy, int alpha) {
-        if (b == null || alpha <= 0) return;
-        float bw = getWidth() * imageScale, bh = getHeight() * imageScale;
-        float s = Math.min(bw / b.getWidth(), bh / b.getHeight());
-        float iw = b.getWidth() * s, ih = b.getHeight() * s;
-        float left = (getWidth() - iw) / 2f, top = (getHeight() - ih) / 2f + dy;
-        if (top > getHeight() || top + ih < 0) return;
-        dst.set(left, top, left + iw, top + ih);
-        bmpPaint.setAlpha(alpha);
-        c.drawBitmap(b, null, dst, bmpPaint);
+        token++;
+        if (!animating) return;
+        for (PageView p : pages) p.animate().cancel();
+        pendingDone = null;
+        finish();
     }
 }

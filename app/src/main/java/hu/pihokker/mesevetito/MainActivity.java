@@ -56,7 +56,10 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     private static final int MUTED = Color.rgb(170, 160, 144);
     private static final Typeface REGULAR = Typeface.create("sans-serif", Typeface.NORMAL);
     private static final Typeface LIGHT = Typeface.create("sans-serif-light", Typeface.NORMAL);
-    private static final float[] SCALES = {1f, 0.94f, 0.88f, 0.82f};
+    private static final int SCALE_MIN = 50, SCALE_STEP = 5;          // képméret: 100% → 50%
+    private static final long[] SPEEDS = {1200, 1800, 2600, 3600};    // lapozás hossza (ms)
+    private static final String[] SPEED_NAMES = {"gyors", "normál", "lassú", "nagyon lassú"};
+    private static final int SPEED_DEFAULT = 2;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService scanner = Executors.newSingleThreadExecutor();
@@ -70,7 +73,11 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
 
     private View libraryLayer;
     private GridView grid;
-    private Button musicBtn, sizeBtn;
+    private Button settingsBtn;
+    private FrameLayout settingsLayer;
+    private LinearLayout settingsRows;
+    private TextView settingsHint;
+    private final List<Row> rows = new ArrayList<>();
     private LinearLayout messageLayer;
     private TextView messageText;
     private Button actionBtn;
@@ -110,6 +117,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         reader = new Reader(readerView, (FilmStripView) readerLayer.getChildAt(1), thumbs, prefs);
         reader.setBox(Math.max(dm.widthPixels, dm.heightPixels), Math.min(dm.widthPixels, dm.heightPixels));
         applyScale();
+        applySpeed();
 
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_MEDIA_MOUNTED);
@@ -137,6 +145,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     @Override
     protected void onResume() {
         super.onResume();
+        refreshSettings(); // pl. visszatérés az engedély-képernyőről
         // pl. visszatérés az engedély-beállításból
         if (lastStatus != -1 && lastStatus != Library.OK) rescan();
     }
@@ -201,7 +210,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
     private void applyLibrary(Library lib) {
         lastStatus = lib.status;
         music.setTracks(lib.music);
-        updateMusicButton(lib.music.isEmpty());
+        refreshSettings();
 
         library = lib;
         String prevKey = selected < items.size() ? keyOf(items.get(selected)) : null;
@@ -394,6 +403,12 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
             return true;
         }
 
+        if (settingsLayer.getVisibility() == View.VISIBLE) return settingsKey(e);
+
+        if (code == KeyEvent.KEYCODE_MENU && !reader.isOpen()) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) openSettings();
+            return true;
+        }
         if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MENU) {
             if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) toggleMusic();
             return true;
@@ -452,32 +467,194 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         boolean on = !music.isEnabled();
         music.setEnabled(on);
         prefs.edit().putBoolean("music", on).apply();
-        updateMusicButton(!music.hasTracks());
+        refreshSettings();
         if (reader.isOpen()) {
             if (!music.hasTracks()) showToast("Nincs zene a pendrive-on");
             else showToast(on ? "♪  Zene be" : "Zene ki");
         }
     }
 
-    private void updateMusicButton(boolean noTracks) {
-        if (musicBtn == null) return;
-        musicBtn.setVisibility(noTracks ? View.GONE : View.VISIBLE);
-        musicBtn.setText(music.isEnabled() ? "♪  Zene: be" : "♪  Zene: ki");
-    }
-
-    private void cycleScale() {
-        float cur = prefs.getFloat("scale", 1f);
-        int idx = 0;
-        for (int i = 0; i < SCALES.length; i++) if (Math.abs(SCALES[i] - cur) < 0.001f) idx = i;
-        float next = SCALES[(idx + 1) % SCALES.length];
-        prefs.edit().putFloat("scale", next).apply();
-        applyScale();
+    private int scalePct() {
+        int pct = Math.round(prefs.getFloat("scale", 1f) * 100);
+        return Math.max(SCALE_MIN, Math.min(100, Math.round(pct / (float) SCALE_STEP) * SCALE_STEP));
     }
 
     private void applyScale() {
-        float s = prefs.getFloat("scale", 1f);
-        readerView.setImageScale(s);
-        sizeBtn.setText("Képméret: " + Math.round(s * 100) + "%");
+        readerView.setImageScale(scalePct() / 100f);
+    }
+
+    private int speedIndex() {
+        return Math.max(0, Math.min(SPEEDS.length - 1, prefs.getInt("speed", SPEED_DEFAULT)));
+    }
+
+    private void applySpeed() {
+        readerView.setSlideMs(SPEEDS[speedIndex()]);
+    }
+
+    // ================================================================ beállítások
+
+    /** Egy sor a beállítások panelen: név, érték, és a ‹ › gombokra a változtatás. */
+    private static final class Row {
+        LinearLayout view;
+        TextView label, value;
+        java.util.function.Supplier<String> text;
+        java.util.function.BiConsumer<Integer, Boolean> change; // irány, körbeforduljon-e
+    }
+
+    private void buildSettingsRows() {
+        addRow("Háttérzene",
+                () -> !music.hasTracks() ? "nincs zene a pendrive-on" : (music.isEnabled() ? "be" : "ki"),
+                (dir, wrap) -> {
+                    if (music.hasTracks()) toggleMusic();
+                });
+        addRow("Lapozás tempója",
+                () -> {
+                    int i = speedIndex();
+                    return SPEED_NAMES[i] + "  (" + String.format(java.util.Locale.ROOT, "%.1f",
+                            SPEEDS[i] / 1000f).replace('.', ',') + " mp)";
+                },
+                (dir, wrap) -> {
+                    int i = speedIndex() + dir;
+                    if (wrap) i = (i + SPEEDS.length) % SPEEDS.length;
+                    i = Math.max(0, Math.min(SPEEDS.length - 1, i));
+                    prefs.edit().putInt("speed", i).apply();
+                    applySpeed();
+                });
+        addRow("Képméret",
+                () -> scalePct() + " %",
+                (dir, wrap) -> {
+                    // jobbra / OK: kisebb kép
+                    int pct = scalePct() - dir * SCALE_STEP;
+                    if (wrap && pct < SCALE_MIN) pct = 100;
+                    pct = Math.max(SCALE_MIN, Math.min(100, pct));
+                    prefs.edit().putFloat("scale", pct / 100f).apply();
+                    applyScale();
+                });
+        addRow("Automatikus indítás",
+                () -> {
+                    if (!AutoStart.enabled(this)) return "ki";
+                    return AutoStart.permitted(this) ? "be" : "be – engedély kell";
+                },
+                (dir, wrap) -> {
+                    boolean on = !AutoStart.enabled(this);
+                    prefs.edit().putBoolean(AutoStart.PREF, on).apply();
+                    if (on && !AutoStart.permitted(this)) requestOverlayPermission();
+                });
+    }
+
+    private void addRow(String label, java.util.function.Supplier<String> text,
+                        java.util.function.BiConsumer<Integer, Boolean> change) {
+        Row r = new Row();
+        r.text = text;
+        r.change = change;
+        r.view = new LinearLayout(this);
+        r.view.setOrientation(LinearLayout.HORIZONTAL);
+        r.view.setGravity(Gravity.CENTER_VERTICAL);
+        r.view.setPadding(px(34), 0, px(34), 0);
+        r.view.setFocusable(true);
+        GradientDrawable normal = new GradientDrawable();
+        normal.setCornerRadius(px(14));
+        normal.setColor(Color.TRANSPARENT);
+        GradientDrawable focused = new GradientDrawable();
+        focused.setCornerRadius(px(14));
+        focused.setColor(Color.argb(26, 243, 230, 200));
+        focused.setStroke(Math.max(1, px(2)), Color.argb(130, 232, 200, 138));
+        StateListDrawable sl = new StateListDrawable();
+        sl.addState(new int[]{android.R.attr.state_focused}, focused);
+        sl.addState(new int[]{}, normal);
+        r.view.setBackground(sl);
+
+        r.label = new TextView(this);
+        r.label.setText(label);
+        r.label.setTypeface(LIGHT);
+        r.label.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(30));
+        r.view.addView(r.label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        r.value = new TextView(this);
+        r.value.setTypeface(REGULAR);
+        r.value.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(30));
+        r.view.addView(r.value);
+        r.view.setOnFocusChangeListener((v, has) -> paintRow(r));
+        r.view.setOnClickListener(v -> {
+            r.change.accept(+1, true);
+            refreshSettings();
+        });
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, px(84));
+        lp.bottomMargin = px(6);
+        settingsRows.addView(r.view, lp);
+        rows.add(r);
+    }
+
+    private void paintRow(Row r) {
+        boolean f = r.view.isFocused();
+        r.label.setTextColor(f ? CREAM : MUTED);
+        r.value.setTextColor(f ? CREAM : MUTED);
+        r.value.setText((f ? "‹   " : "") + r.text.get() + (f ? "   ›" : ""));
+    }
+
+    private void refreshSettings() {
+        for (Row r : rows) paintRow(r);
+    }
+
+    private void openSettings() {
+        if (reader.isOpen()) return;
+        settingsHint.setText("‹ ›  módosítás        Vissza  bezárás");
+        refreshSettings();
+        settingsLayer.animate().cancel();
+        settingsLayer.setAlpha(0f);
+        settingsLayer.setVisibility(View.VISIBLE);
+        settingsLayer.animate().alpha(1f).setDuration(260).start();
+        rows.get(0).view.requestFocus();
+    }
+
+    private void closeSettings() {
+        settingsLayer.animate().cancel();
+        settingsLayer.animate().alpha(0f).setDuration(220)
+                .withEndAction(() -> settingsLayer.setVisibility(View.GONE)).start();
+        if (grid.getVisibility() == View.VISIBLE) grid.requestFocus();
+        else settingsBtn.requestFocus();
+    }
+
+    private boolean settingsKey(KeyEvent e) {
+        int code = e.getKeyCode();
+        boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        Row focused = null;
+        for (Row r : rows) if (r.view.isFocused()) focused = r;
+        switch (code) {
+            case KeyEvent.KEYCODE_BACK:
+            case KeyEvent.KEYCODE_ESCAPE:
+            case KeyEvent.KEYCODE_MENU:
+                if (down && e.getRepeatCount() == 0) {
+                    swallowBackUp = code != KeyEvent.KEYCODE_MENU;
+                    closeSettings();
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (down && focused != null) {
+                    focused.change.accept(code == KeyEvent.KEYCODE_DPAD_RIGHT ? +1 : -1, false);
+                    refreshSettings();
+                }
+                return true;
+            default:
+                return super.dispatchKeyEvent(e);
+        }
+    }
+
+    private void requestOverlayPermission() {
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName())));
+            return;
+        } catch (ActivityNotFoundException ignored) {
+        }
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION));
+            settingsHint.setText("Keresd meg a listában a Mesevetítőt, és engedélyezd.");
+        } catch (ActivityNotFoundException e) {
+            settingsHint.setText("Ezen a projektoron nem érhető el az engedély-képernyő.");
+        }
     }
 
     private void showToast(String text) {
@@ -545,17 +722,12 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         crumb.setEllipsize(TextUtils.TruncateAt.END);
         header.addView(crumb, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        musicBtn = makeButton("♪  Zene: be");
-        musicBtn.setOnClickListener(v -> toggleMusic());
-        musicBtn.setVisibility(View.GONE);
+        settingsBtn = makeButton("Beállítások");
+        settingsBtn.setOnClickListener(v -> openSettings());
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, px(52));
         blp.leftMargin = px(14);
-        header.addView(musicBtn, blp);
-
-        sizeBtn = makeButton("Képméret: 100%");
-        sizeBtn.setOnClickListener(v -> cycleScale());
-        header.addView(sizeBtn, new LinearLayout.LayoutParams(blp));
+        header.addView(settingsBtn, blp);
 
         lib.addView(header, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, px(70)));
@@ -639,6 +811,42 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         readerLayer.setVisibility(View.GONE);
         root.addView(readerLayer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // ---- beállítások panel
+        settingsLayer = new FrameLayout(this);
+        settingsLayer.setBackgroundColor(Color.argb(170, 6, 6, 8));
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(px(40), px(40), px(40), px(30));
+        GradientDrawable pbg = new GradientDrawable();
+        pbg.setCornerRadius(px(22));
+        pbg.setColor(Color.rgb(24, 22, 24));
+        pbg.setStroke(Math.max(1, px(1)), Color.argb(40, 243, 230, 200));
+        panel.setBackground(pbg);
+        TextView ptitle = new TextView(this);
+        ptitle.setText("Beállítások");
+        ptitle.setTextColor(CREAM);
+        ptitle.setTypeface(LIGHT);
+        ptitle.setLetterSpacing(0.04f);
+        ptitle.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(36));
+        ptitle.setPadding(px(34), 0, 0, px(24));
+        panel.addView(ptitle);
+        settingsRows = new LinearLayout(this);
+        settingsRows.setOrientation(LinearLayout.VERTICAL);
+        panel.addView(settingsRows);
+        settingsHint = new TextView(this);
+        settingsHint.setTextColor(Color.rgb(110, 103, 92));
+        settingsHint.setTypeface(LIGHT);
+        settingsHint.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(24));
+        settingsHint.setGravity(Gravity.CENTER_HORIZONTAL);
+        settingsHint.setPadding(0, px(22), 0, 0);
+        panel.addView(settingsHint);
+        settingsLayer.addView(panel, new FrameLayout.LayoutParams(px(980),
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        settingsLayer.setVisibility(View.GONE);
+        root.addView(settingsLayer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        buildSettingsRows();
 
         setContentView(root);
     }

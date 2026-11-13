@@ -3,7 +3,7 @@ package hu.pihokker.mesevetito;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
-import android.net.Uri;
+import android.media.audiofx.LoudnessEnhancer;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -17,7 +17,7 @@ import java.util.List;
  */
 final class MusicPlayer {
 
-    private static final float MAX_GAIN = 0.6f;     // a rendszer-hangerőn belül ennyire szól
+    private static final float MAX_BOOST_DB = 12f;  // halk szám legfeljebb ennyivel erősíthető
     private static final long CROSSFADE_MS = 7000;  // két szám közti áttűnés
     private static final long FADE_IN_MS = 3500;    // bekapcsoláskor
     private static final long FADE_OUT_MS = 2500;   // kikapcsoláskor / kilépéskor
@@ -26,6 +26,10 @@ final class MusicPlayer {
     /** Egy lejátszó a saját hangerő-rámpájával. */
     private static final class Voice {
         MediaPlayer mp;
+        LoudnessEnhancer boost; // halk számok erősítése (határolóval, nem torzít)
+        Node track;
+        float base = 0.45f;     // a szám kiegyenlített hangereje (0..1)
+        boolean measured;       // megvan-e már a mért hangerő
         float level;      // 0..1, ebből számoljuk a hangerőt
         float target;
         float step;       // tickenkénti változás
@@ -35,7 +39,8 @@ final class MusicPlayer {
 
     private final Context ctx;
     private final Handler h = new Handler(Looper.getMainLooper());
-    private final List<Uri> tracks = new ArrayList<>();
+    private final List<Node> tracks = new ArrayList<>();
+    private final Loudness loudness;
     private int next = 0;
     private Voice current;
     private Voice fading; // a kiúszó előző szám
@@ -45,18 +50,26 @@ final class MusicPlayer {
 
     MusicPlayer(Context ctx) {
         this.ctx = ctx.getApplicationContext();
+        this.loudness = new Loudness(ctx);
     }
 
     void setTracks(List<Node> nodes) {
-        List<Uri> uris = new ArrayList<>();
-        for (Node n : nodes) uris.add(n.uri());
-        if (uris.equals(tracks)) return;
+        if (sameTracks(nodes)) return;
         tracks.clear();
-        tracks.addAll(uris);
+        tracks.addAll(nodes);
         Collections.shuffle(tracks);
         next = 0;
+        loudness.measureAll(tracks); // a háttérben, a lejátszás sorrendjében
         if (tracks.isEmpty()) stopAll();
         update();
+    }
+
+    private boolean sameTracks(List<Node> nodes) {
+        if (nodes.size() != tracks.size()) return false;
+        java.util.Set<String> a = new java.util.HashSet<>();
+        for (Node n : tracks) a.add(n.key());
+        for (Node n : nodes) if (!a.contains(n.key())) return false;
+        return true;
     }
 
     boolean hasTracks() {
@@ -103,23 +116,26 @@ final class MusicPlayer {
 
     private Voice startTrack() {
         for (int tries = 0; tries < tracks.size(); tries++) {
-            Uri u = tracks.get(next);
+            Node u = tracks.get(next);
             next = (next + 1) % tracks.size();
             if (next == 0 && tracks.size() > 2) {
                 // új kör: újrakeverés, de az épp lejátszott ne jöjjön rögtön újra
                 Collections.shuffle(tracks);
-                if (tracks.get(0).equals(u)) Collections.swap(tracks, 0, tracks.size() - 1);
+                if (tracks.get(0) == u) Collections.swap(tracks, 0, tracks.size() - 1);
             }
+            loudness.prioritize(tracks.get(next)); // a következő legyen időben megmérve
             try {
                 MediaPlayer mp = new MediaPlayer();
                 mp.setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
-                mp.setDataSource(ctx, u);
+                mp.setDataSource(ctx, u.uri());
                 mp.prepare();
                 mp.setVolume(0f, 0f);
                 Voice v = new Voice();
                 v.mp = mp;
+                v.track = u;
+                applyLoudness(v);
                 mp.setOnCompletionListener(p -> onCompleted(v));
                 mp.setOnErrorListener((p, what, extra) -> {
                     onCompleted(v);
@@ -210,7 +226,7 @@ final class MusicPlayer {
         if (v.level < v.target) v.level = Math.min(v.target, v.level + v.step);
         else if (v.level > v.target) v.level = Math.max(v.target, v.level - v.step);
         // egyenletes hangerősségű áttűnés (equal power)
-        float gain = (float) (MAX_GAIN * Math.sin(v.level * Math.PI / 2));
+        float gain = (float) (v.base * Math.sin(v.level * Math.PI / 2));
         try {
             v.mp.setVolume(gain, gain);
         } catch (IllegalStateException ignored) {
@@ -231,8 +247,42 @@ final class MusicPlayer {
         return v.level != v.target;
     }
 
+    /**
+     * A szám mért hangerejéből: halkítás a lejátszó hangerejével, erősítés (ha kell)
+     * a LoudnessEnhancerrel, ami határolót is tartalmaz, így nem torzít.
+     */
+    private void applyLoudness(Voice v) {
+        float db = loudness.get(v.track);
+        if (Float.isNaN(db)) {
+            v.base = 0.45f; // még nincs megmérve: óvatos, közepes hangerő
+            return;
+        }
+        float diff = Loudness.TARGET_DB - db; // + : erősíteni kell, − : halkítani
+        diff = Math.max(-30f, Math.min(MAX_BOOST_DB, diff));
+        if (diff <= 0) {
+            v.base = (float) Math.pow(10, diff / 20.0);
+        } else {
+            v.base = 1f;
+            try {
+                if (v.boost == null) v.boost = new LoudnessEnhancer(v.mp.getAudioSessionId());
+                v.boost.setTargetGain(Math.round(diff * 100)); // millibel
+                v.boost.setEnabled(true);
+            } catch (Throwable t) {
+                v.boost = null; // ezen a készüléken nem érhető el: marad a teljes hangerő
+            }
+        }
+        v.measured = true;
+    }
+
     private void release(Voice v) {
         if (v == null || v.mp == null) return;
+        if (v.boost != null) {
+            try {
+                v.boost.release();
+            } catch (Exception ignored) {
+            }
+            v.boost = null;
+        }
         try {
             v.mp.release();
         } catch (Exception ignored) {

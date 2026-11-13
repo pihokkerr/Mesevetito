@@ -477,6 +477,10 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
                     return super.dispatchKeyEvent(e);
             }
         }
+        if (shelf == null && !reader.isOpen() && isDefaultHome()
+                && (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE)) {
+            return true; // főképernyőként nincs hova kilépni
+        }
         if (shelf != null && (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE)) {
             if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
                 swallowBackUp = true;
@@ -554,18 +558,12 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
                     applyScale();
                 });
         addRow("Automatikus indítás",
-                () -> {
-                    if (!AutoStart.enabled(this)) return "ki";
-                    return AutoStart.permitted(this) ? "be" : "be – engedély kell (OK)";
-                },
+                () -> isDefaultHome() ? "be  (a Mesevetítő a főképernyő)" : "ki",
+                (dir, wrap) -> openHomeSettings());
+        addRow("A projektor saját menüje",
+                () -> "megnyitás",
                 (dir, wrap) -> {
-                    if (wrap && AutoStart.enabled(this) && !AutoStart.permitted(this)) {
-                        requestOverlayPermission(); // OK: engedély-képernyő újra
-                        return;
-                    }
-                    boolean on = !AutoStart.enabled(this);
-                    prefs.edit().putBoolean(AutoStart.PREF, on).apply();
-                    if (on && !AutoStart.permitted(this)) requestOverlayPermission();
+                    if (wrap) openOriginalLauncher(); // csak OK-ra
                 });
     }
 
@@ -669,30 +667,59 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         }
     }
 
-    private void requestOverlayPermission() {
-        android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
-        if (am.isLowRamDevice()) {
-            // itt a "más appok felett" engedély le van tiltva → kisegítő szolgáltatás
-            settingsHint.setText("Kisegítő lehetőségek → „Mesevetítő – automatikus indítás” → be");
+    // ================================================================ főképernyő-mód
+
+    private static Intent homeIntent() {
+        return new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+    }
+
+    /** A Mesevetítő-e a projektor alapértelmezett főképernyője (→ bekapcsoláskor indul). */
+    private boolean isDefaultHome() {
+        android.content.pm.ResolveInfo ri = getPackageManager()
+                .resolveActivity(homeIntent(), PackageManager.MATCH_DEFAULT_ONLY);
+        return ri != null && ri.activityInfo != null
+                && getPackageName().equals(ri.activityInfo.packageName);
+    }
+
+    /** A főképernyő-app kiválasztása (be- és kikapcsolás is itt). */
+    private void openHomeSettings() {
+        for (String action : new String[]{Settings.ACTION_HOME_SETTINGS,
+                Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS}) {
             try {
-                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-            } catch (ActivityNotFoundException e) {
-                settingsHint.setText("Ezen a projektoron nem érhetők el a Kisegítő lehetőségek.");
+                startActivity(new Intent(action));
+                settingsHint.setText(isDefaultHome()
+                        ? "Kikapcsoláshoz válaszd vissza a projektor eredeti főképernyőjét."
+                        : "Válaszd a Mesevetítőt főképernyőnek (Home app).");
+                return;
+            } catch (ActivityNotFoundException ignored) {
             }
-            return;
         }
+        // nincs ilyen beállítás-képernyő: a Home gomb választója
         try {
-            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + getPackageName())));
-            return;
-        } catch (ActivityNotFoundException ignored) {
-        }
-        try {
-            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION));
-            settingsHint.setText("Keresd meg a listában a Mesevetítőt, és engedélyezd.");
+            startActivity(homeIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            settingsHint.setText("Ha felugrik a választó: Mesevetítő → Mindig (Always).");
         } catch (ActivityNotFoundException e) {
-            settingsHint.setText("Ezen a projektoron nem érhető el az engedély-képernyő.");
+            settingsHint.setText("Ezen a projektoron nem választható főképernyő.");
         }
+    }
+
+    /** A projektor eredeti főképernyője (pl. Netflix, beállítások eléréséhez). */
+    private void openOriginalLauncher() {
+        PackageManager pm = getPackageManager();
+        for (android.content.pm.ResolveInfo ri : pm.queryIntentActivities(homeIntent(), 0)) {
+            String pkg = ri.activityInfo.packageName;
+            if (pkg.equals(getPackageName()) || pkg.equals("com.android.settings")) continue;
+            try {
+                Intent i = homeIntent();
+                i.setClassName(pkg, ri.activityInfo.name);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+                closeSettings();
+                return;
+            } catch (Exception ignored) {
+            }
+        }
+        settingsHint.setText("Nem találtam a projektor saját menüjét.");
     }
 
     private void showToast(String text) {

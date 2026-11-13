@@ -591,7 +591,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
 
         r.label = new TextView(this);
         r.label.setText(label);
-        r.label.setTypeface(LIGHT);
+        r.label.setTypeface(REGULAR);
         r.label.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(30));
         r.view.addView(r.label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         r.value = new TextView(this);
@@ -624,7 +624,7 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
 
     private void openSettings() {
         if (reader.isOpen()) return;
-        settingsHint.setText("‹ ›  módosítás        Vissza  bezárás");
+        settingsHint.setText("‹ ›  módosítás     ·     Vissza: bezárás");
         refreshSettings();
         settingsLayer.animate().cancel();
         settingsLayer.setAlpha(0f);
@@ -900,9 +900,9 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         settingsRows.setOrientation(LinearLayout.VERTICAL);
         panel.addView(settingsRows);
         settingsHint = new TextView(this);
-        settingsHint.setTextColor(Color.rgb(110, 103, 92));
-        settingsHint.setTypeface(LIGHT);
-        settingsHint.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(24));
+        settingsHint.setTextColor(MUTED);
+        settingsHint.setTypeface(REGULAR);
+        settingsHint.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(27));
         settingsHint.setGravity(Gravity.CENTER_HORIZONTAL);
         settingsHint.setPadding(0, px(22), 0, 0);
         panel.addView(settingsHint);
@@ -923,14 +923,14 @@ public class MainActivity extends Activity implements ThumbCache.Listener {
         b.setTextColor(new android.content.res.ColorStateList(
                 new int[][]{{android.R.attr.state_focused}, {}},
                 new int[]{CREAM, MUTED}));
-        b.setTypeface(LIGHT);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(23));
+        b.setTypeface(REGULAR);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(28));
         b.setLetterSpacing(0.04f);
         b.setPadding(px(24), 0, px(24), 0);
         b.setFocusable(true);
         GradientDrawable normal = new GradientDrawable();
         normal.setCornerRadius(px(26));
-        normal.setColor(Color.TRANSPARENT);
+        normal.setColor(Color.argb(18, 243, 230, 200));
         GradientDrawable focused = new GradientDrawable();
         focused.setCornerRadius(px(26));
         focused.setColor(Color.argb(28, 243, 230, 200));
